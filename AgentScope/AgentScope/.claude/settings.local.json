@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet --version)",
+      "Bash(dotnet restore *)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet nuget *)",
+      "Bash(dotnet list *)",
+      "Bash(grep -a -o AwesomeAssertions __TRACKED_VAR__/.nuget/packages/awesomeassertions/8.0.0/lib/net6.0/FluentAssertions.dll)",
+      "Bash(grep -a -o 'FluentAssertions\\\\.' __TRACKED_VAR__/.nuget/packages/awesomeassertions/8.0.0/lib/net6.0/FluentAssertions.dll)",
+      "Bash(grep -a -o 'AwesomeAssertions\\\\.[A-Z][a-zA-Z]*' __TRACKED_VAR__/.nuget/packages/awesomeassertions/8.0.0/lib/net6.0/FluentAssertions.dll)",
+      "Bash(grep -E \"^\\(FluentAssertions|AwesomeAssertions\\)$\")",
+      "Bash(command -v strings)",
+      "Bash(cd /tmp)",
+      "Bash(cat)",
+      "Bash(dotnet test *)",
+      "Bash(dotnet user-secrets *)"
+    ]
+  }
+}

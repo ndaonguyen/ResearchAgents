@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>AgentScope.Web</RootNamespace>
+    <AssemblyName>AgentScope.Web</AssemblyName>
+    <UserSecretsId>agentscope-web-dev</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AgentScope.Application/AgentScope.Application.csproj" />
+    <ProjectReference Include="../AgentScope.Infrastructure/AgentScope.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

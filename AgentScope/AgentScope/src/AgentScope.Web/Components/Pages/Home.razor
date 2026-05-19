@@ -1,0 +1,186 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>AgentScope</PageTitle>
+
+<div class="app">
+    <header>
+        <h1>AgentScope</h1>
+        <span class="subtitle">Week 1 — single agent + Tavily web search</span>
+    </header>
+
+    <section class="chat">
+        <div class="input-row">
+            <input @bind="_question" @bind:event="oninput" @onkeydown="OnKeyDown"
+                   placeholder="Ask anything..." disabled="@_running" />
+            <button @onclick="Ask" disabled="@(_running || string.IsNullOrWhiteSpace(_question))">
+                @(_running ? "Running…" : "Ask")
+            </button>
+        </div>
+
+        <div class="answer">
+            @if (!string.IsNullOrEmpty(_answer))
+            {
+                <pre>@_answer</pre>
+            }
+            else if (_running)
+            {
+                <div class="placeholder">Thinking…</div>
+            }
+            else
+            {
+                <div class="placeholder">The answer will appear here, streaming as the agent works.</div>
+            }
+        </div>
+    </section>
+
+    <section class="events">
+        <h2>Event log</h2>
+        <div class="event-list">
+            @if (_events.Count == 0)
+            {
+                <div class="placeholder">Events from the agent run will appear here.</div>
+            }
+            else
+            {
+                @foreach (var e in _events)
+                {
+                    <div class="event @e.Kind.Replace(".", "-")">
+                        <span class="time">@e.Timestamp.ToString("HH:mm:ss.fff")</span>
+                        <span class="kind">@e.Kind</span>
+                        <span class="agent">@e.AgentId</span>
+                        @if (!string.IsNullOrEmpty(e.Detail))
+                        {
+                            <span class="detail">@e.Detail</span>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </section>
+</div>
+
+<style>
+    .app { max-width: 1100px; margin: 0 auto; padding: 24px; font-family: system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .subtitle { color: #666; font-size: 0.9rem; }
+    .chat { margin-bottom: 24px; }
+    .input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .input-row input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+    .input-row button { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+    .input-row button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .answer { min-height: 80px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .answer pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; }
+    .placeholder { color: #94a3b8; font-style: italic; }
+    .events { background: #0f172a; color: #cbd5e1; border-radius: 8px; padding: 16px; max-height: 400px; overflow-y: auto; }
+    .events h2 { color: white; margin: 0 0 12px; font-size: 1rem; }
+    .event-list .placeholder { color: #64748b; }
+    .event { display: grid; grid-template-columns: 100px 130px 100px 1fr; gap: 8px; padding: 4px 0; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.8rem; border-bottom: 1px solid #1e293b; }
+    .event .time { color: #64748b; }
+    .event .kind { font-weight: 600; }
+    .event.agent-started .kind { color: #34d399; }
+    .event.agent-finished .kind { color: #34d399; }
+    .event.agent-token .kind { color: #60a5fa; }
+    .event.tool-called .kind { color: #fbbf24; }
+    .event.tool-result .kind { color: #fbbf24; }
+    .event.agent-error .kind { color: #f87171; }
+    .event .agent { color: #a78bfa; }
+    .event .detail { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+
+@code {
+    private string _question = "";
+    private string _answer = "";
+    private bool _running;
+    private readonly List<UiEvent> _events = new();
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<Home>? _selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./js/agent-hub.js");
+            await _module.InvokeVoidAsync("init", _selfRef);
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_running && !string.IsNullOrWhiteSpace(_question))
+            await Ask();
+    }
+
+    private async Task Ask()
+    {
+        if (_module is null) return;
+
+        _running = true;
+        _answer = "";
+        _events.Clear();
+        StateHasChanged();
+
+        await _module.InvokeVoidAsync("ask", _question);
+    }
+
+    [JSInvokable]
+    public Task OnEvent(string kind, System.Text.Json.JsonElement payload)
+    {
+        var ts = payload.TryGetProperty("timestamp", out var tsEl)
+            ? tsEl.GetDateTime() : DateTime.UtcNow;
+
+        // AgentId is serialized as { "value": "..." } because it's a readonly record struct.
+        var agentId = ExtractIdValue(payload, "agentId");
+
+        var detail = kind switch
+        {
+            "agent.token" => payload.TryGetProperty("delta", out var d) ? Truncate(d.GetString(), 60) : "",
+            "tool.called" => payload.TryGetProperty("toolName", out var t) ? t.GetString() ?? "" : "",
+            "tool.result" => payload.TryGetProperty("durationMs", out var ms) ? $"{ms.GetInt64()}ms" : "",
+            "agent.error" => payload.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "",
+            _ => ""
+        };
+
+        _events.Add(new UiEvent(kind, agentId, ts, detail));
+
+        if (kind == "agent.token" && payload.TryGetProperty("delta", out var deltaEl))
+            _answer += deltaEl.GetString();
+
+        if (kind is "agent.finished" or "agent.error")
+            _running = false;
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private static string ExtractIdValue(System.Text.Json.JsonElement payload, string propName)
+    {
+        if (!payload.TryGetProperty(propName, out var prop))
+            return "";
+
+        // System.Text.Json serializes a record struct as an object with its properties.
+        return prop.ValueKind == System.Text.Json.JsonValueKind.Object
+            && prop.TryGetProperty("value", out var v)
+                ? v.GetString() ?? ""
+                : prop.GetString() ?? "";
+    }
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s.Substring(0, max) + "…";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); } catch { /* circuit closing */ }
+        }
+        _selfRef?.Dispose();
+    }
+
+    private sealed record UiEvent(string Kind, string AgentId, DateTime Timestamp, string Detail);
+}

@@ -1,0 +1,16 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- SK marks experimental APIs (Agent Framework, web plugins) with these IDs.
+         Suppressing is standard practice while these features stabilise. -->
+    <NoWarn>$(NoWarn);SKEXP0001;SKEXP0010;SKEXP0050;SKEXP0110</NoWarn>
+  </PropertyGroup>
+
+</Project>

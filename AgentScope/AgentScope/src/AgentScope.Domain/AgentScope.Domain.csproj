@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AgentScope.Domain</RootNamespace>
+    <AssemblyName>AgentScope.Domain</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,28 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+.vs/
+.idea/
+*.DotSettings.user
+
+## Build
+artifacts/
+TestResults/
+coverage*.xml
+*.coverage
+*.coveragexml
+
+## Secrets / local config
+appsettings.Development.json
+appsettings.Local.json
+.env
+.env.*
+!.env.example
+secrets.json
+
+## OS
+.DS_Store
+Thumbs.db
