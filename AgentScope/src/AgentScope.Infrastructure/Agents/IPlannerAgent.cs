@@ -1,3 +1,4 @@
+using AgentScope.Application.Abstractions;
 using AgentScope.Domain.Runs;
 using Microsoft.SemanticKernel;
 
@@ -5,7 +6,7 @@ namespace AgentScope.Infrastructure.Agents;
 
 public interface IPlannerAgent
 {
-    Task<IReadOnlyList<string>> PlanAsync(
+    Task<(IReadOnlyList<string> SubQuestions, AgentUsage Usage)> PlanAsync(
         string question, Kernel kernel, RunId runId, CancellationToken ct = default);
 }
 
@@ -20,7 +21,7 @@ public interface IResearcherAgent
     /// only for the critic-driven retry pass — the initial parallel researchers have
     /// nothing to read.
     /// </param>
-    Task<ResearchSummary> ResearchAsync(
+    Task<(ResearchSummary Summary, AgentUsage Usage)> ResearchAsync(
         string subQuestion,
         int index,
         Kernel kernel,
@@ -31,7 +32,7 @@ public interface IResearcherAgent
 
 public interface ICriticAgent
 {
-    Task<Critique> CritiqueAsync(
+    Task<(Critique Critique, AgentUsage Usage)> CritiqueAsync(
         string originalQuestion,
         IReadOnlyList<ResearchSummary> research,
         Kernel kernel,
@@ -41,7 +42,7 @@ public interface ICriticAgent
 
 public interface ISynthesizerAgent
 {
-    Task<string> SynthesizeAsync(
+    Task<(string FinalText, AgentUsage Usage)> SynthesizeAsync(
         string originalQuestion,
         IReadOnlyList<ResearchSummary> research,
         Critique critique,

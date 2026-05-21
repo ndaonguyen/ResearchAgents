@@ -3,7 +3,9 @@ using AgentScope.Application.Abstractions;
 using AgentScope.Domain.Agents;
 using AgentScope.Domain.Events;
 using AgentScope.Domain.Runs;
+using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -31,21 +33,27 @@ public sealed class ResearcherAgent : IResearcherAgent
     private readonly IAgentEventBus _bus;
     private readonly AgentRunContext _runContext;
     private readonly IWorkingMemory _memory;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
     private readonly ILogger<ResearcherAgent> _logger;
 
     public ResearcherAgent(
         IAgentEventBus bus,
         AgentRunContext runContext,
         IWorkingMemory memory,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
         ILogger<ResearcherAgent> logger)
     {
         _bus = bus;
         _runContext = runContext;
         _memory = memory;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
         _logger = logger;
     }
 
-    public async Task<ResearchSummary> ResearchAsync(
+    public async Task<(ResearchSummary Summary, AgentUsage Usage)> ResearchAsync(
         string subQuestion,
         int index,
         Kernel kernel,
@@ -77,18 +85,18 @@ public sealed class ResearcherAgent : IResearcherAgent
             Name = $"Researcher-{index}",
             Instructions = SystemPrompt,
             Kernel = kernel,
-            Arguments = new KernelArguments(new OpenAIPromptExecutionSettings
-            {
-                FunctionChoiceBehavior = FunctionChoiceBehavior.Auto()
-            })
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
         };
 
         var body = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
         var thread = new ChatHistoryAgentThread();
         var userMessage = new ChatMessageContent(AuthorRole.User, ResearcherPromptBuilder.Build(subQuestion, priorContext));
 
         await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
         {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+
             var delta = update.Message.Content;
             if (string.IsNullOrEmpty(delta)) continue;
             body.Append(delta);
@@ -96,6 +104,8 @@ public sealed class ResearcherAgent : IResearcherAgent
         }
 
         var summary = new ResearchSummary(subQuestion, body.ToString());
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
 
         try
         {
@@ -117,9 +127,9 @@ public sealed class ResearcherAgent : IResearcherAgent
         }
 
         await _bus.PublishAsync(new AgentFinishedEvent(
-            runId, agentId, summary.Body, 0, 0, DateTime.UtcNow), ct);
+            runId, agentId, summary.Body, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
 
-        return summary;
+        return (summary, usage);
     }
 }
 

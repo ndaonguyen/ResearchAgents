@@ -18,7 +18,9 @@
       "Bash(dotnet run *)",
       "Bash(netstat -ano)",
       "Bash(docker --version)",
-      "Bash(docker info *)"
+      "Bash(docker info *)",
+      "Read(//tmp/**)",
+      "Bash(dotnet add *)"
     ]
   }
 }

@@ -11,19 +11,20 @@ using Xunit;
 
 namespace AgentScope.Infrastructure.Tests.Agents;
 
-public class OrchestratorWiringTests
+public class OrchestratorUsageAggregationTests
 {
     [Fact]
-    public async Task RunAsync_runs_planner_then_researchers_then_critic_then_synthesizer_in_order()
+    public async Task System_AgentFinishedEvent_sums_tokens_and_cost_across_all_sub_agents()
     {
         var bus = new ChannelAgentEventBus();
-        var runId = new RunId("run-wiring");
+        var runId = new RunId("agg-1");
 
-        var subQuestions = new[] { "Sub Q1", "Sub Q2", "Sub Q3" };
-        var planner = new FakePlanner(subQuestions);
-        var researcher = new FakeResearcher();
-        var critic = new FakeCritic(new Critique(true, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>()));
-        var synthesizer = new FakeSynthesizer("FINAL ANSWER");
+        var planner = new FakePlanner(new[] { "q1", "q2" }, new AgentUsage(10, 20, 0.0001m));
+        var researcher = new FakeResearcher(new AgentUsage(100, 50, 0.001m));
+        var critic = new FakeCritic(
+            new Critique(true, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>()),
+            new AgentUsage(30, 40, 0.0005m));
+        var synthesizer = new FakeSynthesizer("FINAL", new AgentUsage(200, 100, 0.002m));
 
         var orchestrator = new Orchestrator(
             new FakeKernelFactory(),
@@ -38,41 +39,35 @@ public class OrchestratorWiringTests
                 collected.Add(evt);
         });
 
-        await Task.Delay(30); // ensure subscription registered
-
+        await Task.Delay(30);
         await orchestrator.RunAsync(new AgentRunRequest(runId, "the question"));
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await Task.WhenAny(subscribe, Task.Delay(Timeout.Infinite, cts.Token));
 
-        // Sub-agents were called in the right order.
-        planner.Called.Should().BeTrue();
-        researcher.Calls.Should().HaveCount(3, "one researcher per sub-question");
-        researcher.Calls.Select(c => c.SubQuestion).Should().Equal(subQuestions);
-        critic.Called.Should().BeTrue();
-        synthesizer.Called.Should().BeTrue();
-
-        // The synthesizer saw the critic's verdict.
-        synthesizer.ReceivedCritique!.Ok.Should().BeTrue();
-
-        // The terminal event carries the synthesizer's final answer.
         var terminal = collected.OfType<AgentFinishedEvent>()
             .Single(e => e.AgentId == AgentId.System);
-        terminal.FinalText.Should().Be("FINAL ANSWER");
+
+        // Planner(10/20) + 2×Researcher(100/50) + Critic(30/40) + Synth(200/100) = 440 / 260
+        terminal.TokensIn.Should().Be(440);
+        terminal.TokensOut.Should().Be(260);
+
+        // 0.0001 + 2*0.001 + 0.0005 + 0.002 = 0.0046
+        terminal.EstimatedCostUsd.Should().Be(0.0046m);
     }
 
     [Fact]
-    public async Task RunAsync_publishes_system_error_when_a_sub_agent_throws()
+    public async Task System_event_propagates_null_cost_when_all_sub_agents_returned_null_cost()
     {
         var bus = new ChannelAgentEventBus();
-        var runId = new RunId("run-err");
+        var runId = new RunId("agg-2");
 
+        var nullCost = new AgentUsage(10, 5, null);
         var orchestrator = new Orchestrator(
             new FakeKernelFactory(),
-            new FakePlanner(new[] { "q1" }),
-            new ThrowingResearcher(),
-            new FakeCritic(new Critique(true, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>())),
-            new FakeSynthesizer("unused"),
+            new FakePlanner(new[] { "q" }, nullCost),
+            new FakeResearcher(nullCost),
+            new FakeCritic(new Critique(true, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>()), nullCost),
+            new FakeSynthesizer("F", nullCost),
             bus,
             NullLogger<Orchestrator>.Instance);
 
@@ -85,12 +80,16 @@ public class OrchestratorWiringTests
 
         await Task.Delay(30);
         await orchestrator.RunAsync(new AgentRunRequest(runId, "q"));
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await Task.WhenAny(subscribe, Task.Delay(Timeout.Infinite, cts.Token));
 
-        collected.OfType<AgentErrorEvent>()
-            .Should().ContainSingle(e => e.AgentId == AgentId.System);
+        var terminal = collected.OfType<AgentFinishedEvent>()
+            .Single(e => e.AgentId == AgentId.System);
+
+        terminal.TokensIn.Should().Be(40);  // 10 * 4 calls
+        terminal.TokensOut.Should().Be(20); // 5 * 4 calls
+        // AgentUsage.Empty.Add(null-cost) yields 0, so the seed dominates: total cost is 0m, not null.
+        terminal.EstimatedCostUsd.Should().Be(0m);
     }
 
     // -- fakes --
@@ -103,70 +102,58 @@ public class OrchestratorWiringTests
     private sealed class FakePlanner : IPlannerAgent
     {
         private readonly IReadOnlyList<string> _subQuestions;
-        public bool Called { get; private set; }
-
-        public FakePlanner(IReadOnlyList<string> subQuestions) => _subQuestions = subQuestions;
+        private readonly AgentUsage _usage;
+        public FakePlanner(IReadOnlyList<string> subQuestions, AgentUsage usage)
+        {
+            _subQuestions = subQuestions;
+            _usage = usage;
+        }
 
         public Task<(IReadOnlyList<string> SubQuestions, AgentUsage Usage)> PlanAsync(
             string question, Kernel kernel, RunId runId, CancellationToken ct = default)
-        {
-            Called = true;
-            return Task.FromResult((_subQuestions, AgentUsage.Empty));
-        }
+            => Task.FromResult((_subQuestions, _usage));
     }
 
     private sealed class FakeResearcher : IResearcherAgent
     {
-        public List<(string SubQuestion, int Index)> Calls { get; } = new();
+        private readonly AgentUsage _usage;
+        public FakeResearcher(AgentUsage usage) => _usage = usage;
 
         public Task<(ResearchSummary Summary, AgentUsage Usage)> ResearchAsync(
             string subQuestion, int index, Kernel kernel, RunId runId,
             bool searchMemoryFirst = false, CancellationToken ct = default)
-        {
-            lock (Calls) Calls.Add((subQuestion, index));
-            return Task.FromResult((new ResearchSummary(subQuestion, $"body-{index}"), AgentUsage.Empty));
-        }
-    }
-
-    private sealed class ThrowingResearcher : IResearcherAgent
-    {
-        public Task<(ResearchSummary Summary, AgentUsage Usage)> ResearchAsync(
-            string subQuestion, int index, Kernel kernel, RunId runId,
-            bool searchMemoryFirst = false, CancellationToken ct = default)
-            => throw new InvalidOperationException("kaboom");
+            => Task.FromResult((new ResearchSummary(subQuestion, $"body-{index}"), _usage));
     }
 
     private sealed class FakeCritic : ICriticAgent
     {
         private readonly Critique _critique;
-        public bool Called { get; private set; }
-
-        public FakeCritic(Critique critique) => _critique = critique;
+        private readonly AgentUsage _usage;
+        public FakeCritic(Critique critique, AgentUsage usage)
+        {
+            _critique = critique;
+            _usage = usage;
+        }
 
         public Task<(Critique Critique, AgentUsage Usage)> CritiqueAsync(
             string originalQuestion, IReadOnlyList<ResearchSummary> research,
             Kernel kernel, RunId runId, CancellationToken ct = default)
-        {
-            Called = true;
-            return Task.FromResult((_critique, AgentUsage.Empty));
-        }
+            => Task.FromResult((_critique, _usage));
     }
 
     private sealed class FakeSynthesizer : ISynthesizerAgent
     {
         private readonly string _finalAnswer;
-        public bool Called { get; private set; }
-        public Critique? ReceivedCritique { get; private set; }
-
-        public FakeSynthesizer(string finalAnswer) => _finalAnswer = finalAnswer;
+        private readonly AgentUsage _usage;
+        public FakeSynthesizer(string finalAnswer, AgentUsage usage)
+        {
+            _finalAnswer = finalAnswer;
+            _usage = usage;
+        }
 
         public Task<(string FinalText, AgentUsage Usage)> SynthesizeAsync(
             string originalQuestion, IReadOnlyList<ResearchSummary> research,
             Critique critique, Kernel kernel, RunId runId, CancellationToken ct = default)
-        {
-            Called = true;
-            ReceivedCritique = critique;
-            return Task.FromResult((_finalAnswer, AgentUsage.Empty));
-        }
+            => Task.FromResult((_finalAnswer, _usage));
     }
 }

@@ -3,11 +3,12 @@ using AgentScope.Application.Abstractions;
 using AgentScope.Domain.Agents;
 using AgentScope.Domain.Events;
 using AgentScope.Domain.Runs;
+using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
 
 namespace AgentScope.Infrastructure.Agents;
 
@@ -43,16 +44,25 @@ public sealed class SynthesizerAgent : ISynthesizerAgent
 
     private readonly IAgentEventBus _bus;
     private readonly AgentRunContext _runContext;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
     private readonly ILogger<SynthesizerAgent> _logger;
 
-    public SynthesizerAgent(IAgentEventBus bus, AgentRunContext runContext, ILogger<SynthesizerAgent> logger)
+    public SynthesizerAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
+        ILogger<SynthesizerAgent> logger)
     {
         _bus = bus;
         _runContext = runContext;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
         _logger = logger;
     }
 
-    public async Task<string> SynthesizeAsync(
+    public async Task<(string FinalText, AgentUsage Usage)> SynthesizeAsync(
         string originalQuestion,
         IReadOnlyList<ResearchSummary> research,
         Critique critique,
@@ -72,14 +82,18 @@ public sealed class SynthesizerAgent : ISynthesizerAgent
             Name = "Synthesizer",
             Instructions = SystemPrompt,
             Kernel = kernel,
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build())
         };
 
         var body = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
         var thread = new ChatHistoryAgentThread();
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
 
         await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
         {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+
             var delta = update.Message.Content;
             if (string.IsNullOrEmpty(delta)) continue;
             body.Append(delta);
@@ -87,10 +101,13 @@ public sealed class SynthesizerAgent : ISynthesizerAgent
         }
 
         var finalText = body.ToString();
-        await _bus.PublishAsync(new AgentFinishedEvent(
-            runId, agentId, finalText, 0, 0, DateTime.UtcNow), ct);
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
 
-        return finalText;
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, agentId, finalText, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
+
+        return (finalText, usage);
     }
 
     private static string BuildPrompt(

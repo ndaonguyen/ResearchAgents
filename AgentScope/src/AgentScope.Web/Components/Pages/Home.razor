@@ -8,7 +8,17 @@
 <div class="app">
     <header>
         <h1>AgentScope</h1>
-        <span class="subtitle">Week 2 — orchestrator: planner → researchers → critic → synthesizer</span>
+        <span class="subtitle">Week 3 — orchestrator + token & cost tracking</span>
+        @if (_runUsage is not null)
+        {
+            <span class="run-cost">
+                <span class="run-cost-tokens">@_runUsage.TokensIn.ToString("N0") in / @_runUsage.TokensOut.ToString("N0") out</span>
+                @if (_runUsage.CostUsd is { } cost)
+                {
+                    <span class="run-cost-usd">@cost.ToString("C4", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</span>
+                }
+            </span>
+        }
     </header>
 
     <section class="chat">
@@ -115,6 +125,9 @@
     .stage.done .stage-badge { color: #16a34a; }
     .stage.error { border-color: #f87171; background: #fef2f2; }
     .stage.error .stage-badge { color: #dc2626; }
+    .run-cost { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.85rem; }
+    .run-cost-tokens { color: #64748b; }
+    .run-cost-usd { background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
     .answer { min-height: 80px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
     .answer pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; }
     .placeholder { color: #94a3b8; font-style: italic; }
@@ -147,6 +160,8 @@
     private int _researchersFinished;
     private StageStatus _criticStatus = StageStatus.Idle;
     private StageStatus _synthesizerStatus = StageStatus.Idle;
+
+    private RunUsage? _runUsage;
 
     private StageStatus ResearcherStageStatus =>
         _researchersStarted == 0 ? StageStatus.Idle
@@ -200,6 +215,7 @@
         _researchersFinished = 0;
         _criticStatus = StageStatus.Idle;
         _synthesizerStatus = StageStatus.Idle;
+        _runUsage = null;
 
         StateHasChanged();
 
@@ -221,10 +237,15 @@
             "tool.called" => payload.TryGetProperty("toolName", out var t) ? t.GetString() ?? "" : "",
             "tool.result" => payload.TryGetProperty("durationMs", out var ms) ? $"{ms.GetInt64()}ms" : "",
             "agent.error" => payload.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "",
+            "agent.finished" => FormatUsage(payload),
             _ => ""
         };
 
         _events.Add(new UiEvent(kind, agentId, ts, detail));
+
+        // The terminal system-level event carries the run-total usage. Snapshot it for the header.
+        if (kind == "agent.finished" && agentId == "system")
+            _runUsage = ExtractUsage(payload);
 
         // Only the synthesizer's tokens form the user-facing answer.
         // Planner/researcher/critic tokens are intermediate; they're visible in the event log.
@@ -286,6 +307,35 @@
     private static string Truncate(string? s, int max) =>
         string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s.Substring(0, max) + "…";
 
+    private static RunUsage? ExtractUsage(System.Text.Json.JsonElement payload)
+    {
+        if (!payload.TryGetProperty("tokensIn", out var inEl) ||
+            !payload.TryGetProperty("tokensOut", out var outEl))
+        {
+            return null;
+        }
+
+        decimal? cost = null;
+        if (payload.TryGetProperty("estimatedCostUsd", out var c) &&
+            c.ValueKind == System.Text.Json.JsonValueKind.Number)
+        {
+            cost = c.GetDecimal();
+        }
+
+        return new RunUsage(inEl.GetInt32(), outEl.GetInt32(), cost);
+    }
+
+    private static string FormatUsage(System.Text.Json.JsonElement payload)
+    {
+        var u = ExtractUsage(payload);
+        if (u is null || (u.TokensIn == 0 && u.TokensOut == 0)) return "";
+
+        var tokenPart = $"{u.TokensIn:N0}↓ {u.TokensOut:N0}↑";
+        return u.CostUsd is { } cost
+            ? $"{tokenPart} · {cost.ToString("C4", System.Globalization.CultureInfo.GetCultureInfo("en-US"))}"
+            : tokenPart;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_module is not null)
@@ -296,4 +346,6 @@
     }
 
     private sealed record UiEvent(string Kind, string AgentId, DateTime Timestamp, string Detail);
+
+    private sealed record RunUsage(int TokensIn, int TokensOut, decimal? CostUsd);
 }

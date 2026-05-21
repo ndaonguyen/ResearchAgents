@@ -140,21 +140,21 @@ public class OrchestratorRetryTests
         private readonly IReadOnlyList<string> _subQuestions;
         public FakePlanner(IReadOnlyList<string> subQuestions) => _subQuestions = subQuestions;
 
-        public Task<IReadOnlyList<string>> PlanAsync(
+        public Task<(IReadOnlyList<string> SubQuestions, AgentUsage Usage)> PlanAsync(
             string question, Kernel kernel, RunId runId, CancellationToken ct = default)
-            => Task.FromResult(_subQuestions);
+            => Task.FromResult((_subQuestions, AgentUsage.Empty));
     }
 
     private sealed class FakeResearcher : IResearcherAgent
     {
         public List<(string SubQuestion, int Index, bool SearchedMemory)> Calls { get; } = new();
 
-        public Task<ResearchSummary> ResearchAsync(
+        public Task<(ResearchSummary Summary, AgentUsage Usage)> ResearchAsync(
             string subQuestion, int index, Kernel kernel, RunId runId,
             bool searchMemoryFirst = false, CancellationToken ct = default)
         {
             lock (Calls) Calls.Add((subQuestion, index, searchMemoryFirst));
-            return Task.FromResult(new ResearchSummary(subQuestion, $"body-{index}"));
+            return Task.FromResult((new ResearchSummary(subQuestion, $"body-{index}"), AgentUsage.Empty));
         }
     }
 
@@ -163,10 +163,10 @@ public class OrchestratorRetryTests
         private readonly Critique _critique;
         public FakeCritic(Critique critique) => _critique = critique;
 
-        public Task<Critique> CritiqueAsync(
+        public Task<(Critique Critique, AgentUsage Usage)> CritiqueAsync(
             string originalQuestion, IReadOnlyList<ResearchSummary> research,
             Kernel kernel, RunId runId, CancellationToken ct = default)
-            => Task.FromResult(_critique);
+            => Task.FromResult((_critique, AgentUsage.Empty));
     }
 
     private sealed class FakeSynthesizer : ISynthesizerAgent
@@ -176,12 +176,12 @@ public class OrchestratorRetryTests
 
         public FakeSynthesizer(string finalAnswer) => _finalAnswer = finalAnswer;
 
-        public Task<string> SynthesizeAsync(
+        public Task<(string FinalText, AgentUsage Usage)> SynthesizeAsync(
             string originalQuestion, IReadOnlyList<ResearchSummary> research,
             Critique critique, Kernel kernel, RunId runId, CancellationToken ct = default)
         {
             ReceivedResearch = research;
-            return Task.FromResult(_finalAnswer);
+            return Task.FromResult((_finalAnswer, AgentUsage.Empty));
         }
     }
 }

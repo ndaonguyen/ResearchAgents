@@ -33,7 +33,7 @@ public class ChannelAgentEventBusTests
         await bus.PublishAsync(new AgentTokenEvent(runA, new AgentId("a"), "A1", DateTime.UtcNow));
         await bus.PublishAsync(new AgentTokenEvent(runB, new AgentId("b"), "B1", DateTime.UtcNow));
         await bus.PublishAsync(new AgentTokenEvent(runA, new AgentId("a"), "A2", DateTime.UtcNow));
-        await bus.PublishAsync(new AgentFinishedEvent(runA, AgentId.System, "done", 0, 0, DateTime.UtcNow));
+        await bus.PublishAsync(new AgentFinishedEvent(runA, AgentId.System, "done", 0, 0, null, DateTime.UtcNow));
 
         var received = await subscribeTask;
         received.Should().ContainInOrder("A1", "A2");
@@ -57,7 +57,7 @@ public class ChannelAgentEventBusTests
         await Task.Delay(50);
 
         await bus.PublishAsync(new AgentStartedEvent(runId, new AgentId("a"), "A", DateTime.UtcNow));
-        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.System, "ok", 0, 0, DateTime.UtcNow));
+        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.System, "ok", 0, 0, null, DateTime.UtcNow));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var completed = await Task.WhenAny(subscribeTask, Task.Delay(Timeout.Infinite, cts.Token));
@@ -84,9 +84,9 @@ public class ChannelAgentEventBusTests
 
         // A sub-agent finishing must NOT end the run — only the orchestrator's
         // system-level AgentFinishedEvent is terminal.
-        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.Planner, "plan", 0, 0, DateTime.UtcNow));
-        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.Critic, "critique", 0, 0, DateTime.UtcNow));
-        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.System, "final", 0, 0, DateTime.UtcNow));
+        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.Planner, "plan", 0, 0, null, DateTime.UtcNow));
+        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.Critic, "critique", 0, 0, null, DateTime.UtcNow));
+        await bus.PublishAsync(new AgentFinishedEvent(runId, AgentId.System, "final", 0, 0, null, DateTime.UtcNow));
 
         (await subscribeTask).Should().Be(3);
     }

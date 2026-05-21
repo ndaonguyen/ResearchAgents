@@ -4,6 +4,7 @@ using AgentScope.Infrastructure.EventBus;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Agents.Filters;
 using AgentScope.Infrastructure.Memory;
+using AgentScope.Infrastructure.Pricing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -35,6 +36,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<EventPublishingFunctionFilter>();
 
         services.AddSingleton<IKernelFactory, KernelFactory>();
+
+        // Pricing for per-agent + per-run cost estimation.
+        services.AddSingleton<IUsageCalculator, ModelPricingCalculator>();
 
         // Working memory — Null by default; Qdrant when explicitly enabled in config.
         // Per-run isolation is handled inside the implementation (Qdrant filters by run_id).

@@ -4,11 +4,12 @@ using AgentScope.Application.Abstractions;
 using AgentScope.Domain.Agents;
 using AgentScope.Domain.Events;
 using AgentScope.Domain.Runs;
+using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
 
 namespace AgentScope.Infrastructure.Agents;
 
@@ -41,16 +42,25 @@ public sealed class CriticAgent : ICriticAgent
 
     private readonly IAgentEventBus _bus;
     private readonly AgentRunContext _runContext;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
     private readonly ILogger<CriticAgent> _logger;
 
-    public CriticAgent(IAgentEventBus bus, AgentRunContext runContext, ILogger<CriticAgent> logger)
+    public CriticAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
+        ILogger<CriticAgent> logger)
     {
         _bus = bus;
         _runContext = runContext;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
         _logger = logger;
     }
 
-    public async Task<Critique> CritiqueAsync(
+    public async Task<(Critique Critique, AgentUsage Usage)> CritiqueAsync(
         string originalQuestion,
         IReadOnlyList<ResearchSummary> research,
         Kernel kernel,
@@ -69,18 +79,18 @@ public sealed class CriticAgent : ICriticAgent
             Name = "Critic",
             Instructions = SystemPrompt,
             Kernel = kernel,
-            Arguments = new KernelArguments(new OpenAIPromptExecutionSettings
-            {
-                ResponseFormat = "json_object"
-            })
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(responseFormat: "json_object"))
         };
 
         var raw = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
         var thread = new ChatHistoryAgentThread();
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
 
         await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
         {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+
             var delta = update.Message.Content;
             if (string.IsNullOrEmpty(delta)) continue;
             raw.Append(delta);
@@ -89,11 +99,13 @@ public sealed class CriticAgent : ICriticAgent
 
         var json = raw.ToString();
         var critique = ParseCritique(json);
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
 
         await _bus.PublishAsync(new AgentFinishedEvent(
-            runId, agentId, json, 0, 0, DateTime.UtcNow), ct);
+            runId, agentId, json, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
 
-        return critique;
+        return (critique, usage);
     }
 
     private static string BuildCriticPrompt(string question, IReadOnlyList<ResearchSummary> research)

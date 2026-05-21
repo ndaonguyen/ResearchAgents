@@ -43,18 +43,23 @@ public sealed class Orchestrator : IOrchestrator
         try
         {
             var kernel = _kernelFactory.Create();
+            var totalUsage = AgentUsage.Empty;
 
             // 1. PLAN
-            var subQuestions = await _planner.PlanAsync(request.Question, kernel, request.RunId, ct);
+            var (subQuestions, plannerUsage) = await _planner.PlanAsync(request.Question, kernel, request.RunId, ct);
+            totalUsage = totalUsage.Add(plannerUsage);
 
             // 2. RESEARCH — parallel fanout
             var researchTasks = subQuestions
                 .Select((q, i) => _researcher.ResearchAsync(q, i + 1, kernel, request.RunId, ct: ct))
                 .ToList();
-            var research = await Task.WhenAll(researchTasks);
+            var researchResults = await Task.WhenAll(researchTasks);
+            var research = researchResults.Select(r => r.Summary).ToArray();
+            foreach (var r in researchResults) totalUsage = totalUsage.Add(r.Usage);
 
             // 3. CRITIQUE
-            var critique = await _critic.CritiqueAsync(request.Question, research, kernel, request.RunId, ct);
+            var (critique, criticUsage) = await _critic.CritiqueAsync(request.Question, research, kernel, request.RunId, ct);
+            totalUsage = totalUsage.Add(criticUsage);
 
             // 3b. CRITIC-DRIVEN RETRY — one focused pass if the critic flagged a fixable gap.
             //     We don't re-run the critic afterwards (cap retries at 1) to keep latency bounded
@@ -62,7 +67,7 @@ public sealed class Orchestrator : IOrchestrator
             var augmentedResearch = research.ToList();
             if (TryDeriveRetryQuestion(critique, out var focusedQuestion))
             {
-                var retrySummary = await _researcher.ResearchAsync(
+                var (retrySummary, retryUsage) = await _researcher.ResearchAsync(
                     focusedQuestion,
                     augmentedResearch.Count + 1,
                     kernel,
@@ -70,15 +75,19 @@ public sealed class Orchestrator : IOrchestrator
                     searchMemoryFirst: true,
                     ct: ct);
                 augmentedResearch.Add(retrySummary);
+                totalUsage = totalUsage.Add(retryUsage);
             }
 
             // 4. SYNTHESIZE — streams the final answer to the UI.
-            var finalAnswer = await _synthesizer.SynthesizeAsync(
+            var (finalAnswer, synthUsage) = await _synthesizer.SynthesizeAsync(
                 request.Question, augmentedResearch, critique, kernel, request.RunId, ct);
+            totalUsage = totalUsage.Add(synthUsage);
 
-            // 5. Terminate the run.
+            // 5. Terminate the run — system-level AgentFinishedEvent carries run-wide totals.
             await _bus.PublishAsync(new AgentFinishedEvent(
-                request.RunId, AgentId.System, finalAnswer, 0, 0, DateTime.UtcNow), ct);
+                request.RunId, AgentId.System, finalAnswer,
+                totalUsage.TokensIn, totalUsage.TokensOut, totalUsage.CostUsd,
+                DateTime.UtcNow), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

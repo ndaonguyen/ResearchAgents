@@ -20,7 +20,7 @@ public class StartRunUseCaseTests
         {
             await bus.PublishAsync(new AgentStartedEvent(req.RunId, new AgentId("r"), "R", DateTime.UtcNow), ct);
             await bus.PublishAsync(new AgentTokenEvent(req.RunId, new AgentId("r"), "hi", DateTime.UtcNow), ct);
-            await bus.PublishAsync(new AgentFinishedEvent(req.RunId, AgentId.System, "hi", 0, 0, DateTime.UtcNow), ct);
+            await bus.PublishAsync(new AgentFinishedEvent(req.RunId, AgentId.System, "hi", 0, 0, null, DateTime.UtcNow), ct);
         });
 
         var useCase = new StartRunUseCase(fakeOrchestrator, bus, NullLogger<StartRunUseCase>.Instance);

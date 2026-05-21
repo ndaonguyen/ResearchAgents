@@ -28,6 +28,7 @@ public sealed record AgentFinishedEvent(
     string FinalText,
     int TokensIn,
     int TokensOut,
+    decimal? EstimatedCostUsd,
     DateTime Timestamp) : AgentEvent(RunId, AgentId, Timestamp)
 {
     public override string Kind => "agent.finished";

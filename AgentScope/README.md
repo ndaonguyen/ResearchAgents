@@ -4,7 +4,7 @@ A transparent multi-agent research assistant built on Semantic Kernel + Blazor S
 
 The hook: most multi-agent demos are black boxes. AgentScope shows the agent graph executing live — every tool call, every token, every decision visible in real time.
 
-## Status — Week 2 (multi-agent orchestration + working memory)
+## Status — Week 3 (token & cost tracking)
 
 Week 1 foundations (still in place):
 - Clean Architecture solution (Domain → Application → Infrastructure → Web)
@@ -26,7 +26,13 @@ New in week 2:
 - **Second specialised plugin**: `BookLookupPlugin` for Open Library (table of contents that web search struggles with)
 - Tests for orchestrator wiring, the critic-driven retry, output parsing, and in-memory working memory isolation
 
-Coming in week 3/4: token-usage tracking, persistence, OpenTelemetry tracing.
+New in week 3:
+- **Real token usage** extracted from OpenAI's streaming responses via `stream_options.include_usage` — `AgentFinishedEvent` now carries actual `TokensIn`/`TokensOut` instead of hardcoded zeros
+- **`IUsageCalculator` port + `ModelPricingCalculator`** — per-model USD pricing table (gpt-4o-mini, gpt-4o, gpt-4.1, embeddings) returning `null` for unknown models so the UI can show "—" instead of misleading `$0.00`
+- **Run-level aggregation** — the system-level terminal `AgentFinishedEvent` sums tokens and cost across every sub-agent invocation (including the critic-driven retry)
+- **UI surface**: per-agent token chip on each `agent.finished` row, total run cost shown in the header
+
+Coming in week 4: persistence, OpenTelemetry tracing, embeddings-token tracking.
 
 ## Architecture
 
@@ -165,7 +171,7 @@ AgentScope/
 
 | Limitation | Fix in |
 |---|---|
-| `AgentFinishedEvent` reports 0 tokens (no usage tracking) | Week 4 |
+| Embeddings calls (`QdrantWorkingMemory`) aren't counted toward run cost | Week 4 |
 | No persistence — runs are in-memory only | Week 4 |
 | No OpenTelemetry tracing | Week 4 |
 | Tavily plugin uses default options (no domain filtering, default depth) | As needed |
