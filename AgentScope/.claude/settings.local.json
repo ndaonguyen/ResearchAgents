@@ -16,7 +16,9 @@
       "Bash(dotnet test *)",
       "Bash(dotnet user-secrets *)",
       "Bash(dotnet run *)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(docker --version)",
+      "Bash(docker info *)"
     ]
   }
 }
