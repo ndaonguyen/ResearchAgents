@@ -11,8 +11,22 @@ public interface IPlannerAgent
 
 public interface IResearcherAgent
 {
+    /// <summary>
+    /// Research one sub-question.
+    /// </summary>
+    /// <param name="searchMemoryFirst">
+    /// When true, the researcher searches working memory for prior summaries in this run
+    /// and includes them as context (so it can fill gaps instead of duplicating). Set true
+    /// only for the critic-driven retry pass — the initial parallel researchers have
+    /// nothing to read.
+    /// </param>
     Task<ResearchSummary> ResearchAsync(
-        string subQuestion, int index, Kernel kernel, RunId runId, CancellationToken ct = default);
+        string subQuestion,
+        int index,
+        Kernel kernel,
+        RunId runId,
+        bool searchMemoryFirst = false,
+        CancellationToken ct = default);
 }
 
 public interface ICriticAgent

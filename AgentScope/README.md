@@ -4,20 +4,29 @@ A transparent multi-agent research assistant built on Semantic Kernel + Blazor S
 
 The hook: most multi-agent demos are black boxes. AgentScope shows the agent graph executing live — every tool call, every token, every decision visible in real time.
 
-## Status — Week 1 (foundations)
+## Status — Week 2 (multi-agent orchestration + working memory)
 
-What works:
+Week 1 foundations (still in place):
 - Clean Architecture solution (Domain → Application → Infrastructure → Web)
 - Centralised package management (`Directory.Packages.props`)
 - Semantic Kernel `ChatCompletionAgent` with auto function calling
 - Tavily web search plugin registered as a kernel function
-- **Per-run event channels** — concurrent runs are isolated (fixes the v1 shared-bus issue)
+- **Per-run event channels** — concurrent runs are isolated
 - **AsyncLocal run context** — concurrent agents attribute their tool events correctly
 - `IFunctionInvocationFilter` captures every tool call onto the event bus, with no per-tool wiring
 - Live token streaming + event log UI over SignalR
-- Tests for the domain, the use case, the event bus isolation, and the async-local context
 
-Coming in week 2: planner → researcher(s) → critic → synthesizer orchestration, Qdrant working memory.
+New in week 2:
+- **Multi-agent orchestration**: planner → researchers (parallel fan-out) → critic → synthesizer, behind an `IOrchestrator` port
+- **Structured JSON outputs** for the planner (`sub_questions`) and critic (`ok`, `missing_topics`, `weak_claims`, `shape_mismatch`)
+- **Critic-driven retry**: when the critic flags a shape mismatch or weak claim, the orchestrator runs one focused researcher pass before synthesis (capped at 1 retry)
+- **`IWorkingMemory` port** with two implementations:
+  - `NullWorkingMemory` (default — app runs without a vector store)
+  - `QdrantWorkingMemory` (per-run isolation via a `run_id` payload filter, OpenAI embeddings)
+- **Second specialised plugin**: `BookLookupPlugin` for Open Library (table of contents that web search struggles with)
+- Tests for orchestrator wiring, the critic-driven retry, output parsing, and in-memory working memory isolation
+
+Coming in week 3/4: token-usage tracking, persistence, OpenTelemetry tracing.
 
 ## Architecture
 
@@ -84,6 +93,18 @@ dotnet user-secrets init
 dotnet user-secrets set "AgentScope:OpenAi:ApiKey" "sk-..."
 dotnet user-secrets set "AgentScope:Tavily:ApiKey" "tvly-..."
 ```
+
+### Optional — enable Qdrant working memory
+
+Working memory is off by default. To turn it on, run Qdrant locally (e.g. `docker run -p 6334:6334 qdrant/qdrant`) and set:
+
+```bash
+dotnet user-secrets set "AgentScope:Qdrant:Enabled" "true"
+dotnet user-secrets set "AgentScope:Qdrant:Host" "localhost"
+dotnet user-secrets set "AgentScope:Qdrant:Port" "6334"
+```
+
+The collection (`agentscope-working-memory` by default) is created lazily on the first researcher write. Per-run isolation is enforced inside `QdrantWorkingMemory` by filtering every search on the `run_id` payload field.
 
 Rider users: right-click `AgentScope.Web` → **Tools** → **Open Project User Secrets**.
 

@@ -1,3 +1,4 @@
+using AgentScope.Application.Abstractions;
 using AgentScope.Infrastructure.Agents;
 using FluentAssertions;
 using Xunit;
@@ -101,5 +102,34 @@ public class AgentOutputParsingTests
         critique.Ok.Should().BeFalse();
         critique.WeakClaims.Should().NotBeEmpty("the parser should surface the parsing failure");
         critique.ShapeMismatch.Should().BeEmpty();
+    }
+
+    // -- ResearcherPromptBuilder.Build --
+
+    [Fact]
+    public void Researcher_prompt_with_no_prior_context_returns_subquestion_verbatim()
+    {
+        var prompt = ResearcherPromptBuilder.Build("What is X?", Array.Empty<MemoryHit>());
+        prompt.Should().Be("What is X?");
+    }
+
+    [Fact]
+    public void Researcher_prompt_with_prior_context_prepends_hits_and_gap_instruction()
+    {
+        var hits = new[]
+        {
+            new MemoryHit("WebAssembly runs in a sandbox.", 0.9f,
+                new Dictionary<string, string> { ["sub_question"] = "What is WASM?" }),
+            new MemoryHit("WASM has near-native performance.", 0.85f,
+                new Dictionary<string, string>())
+        };
+
+        var prompt = ResearcherPromptBuilder.Build(
+            "Provide specific facts about WASM security tradeoffs.", hits);
+
+        prompt.Should().Contain("DO NOT restate", "the prompt must tell the researcher to fill gaps");
+        prompt.Should().Contain("WebAssembly runs in a sandbox.");
+        prompt.Should().Contain("WASM has near-native performance.");
+        prompt.Should().Contain("Provide specific facts about WASM security tradeoffs.");
     }
 }

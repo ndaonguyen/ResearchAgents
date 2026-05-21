@@ -120,7 +120,8 @@ public class OrchestratorWiringTests
         public List<(string SubQuestion, int Index)> Calls { get; } = new();
 
         public Task<ResearchSummary> ResearchAsync(
-            string subQuestion, int index, Kernel kernel, RunId runId, CancellationToken ct = default)
+            string subQuestion, int index, Kernel kernel, RunId runId,
+            bool searchMemoryFirst = false, CancellationToken ct = default)
         {
             lock (Calls) Calls.Add((subQuestion, index));
             return Task.FromResult(new ResearchSummary(subQuestion, $"body-{index}"));
@@ -130,7 +131,8 @@ public class OrchestratorWiringTests
     private sealed class ThrowingResearcher : IResearcherAgent
     {
         public Task<ResearchSummary> ResearchAsync(
-            string subQuestion, int index, Kernel kernel, RunId runId, CancellationToken ct = default)
+            string subQuestion, int index, Kernel kernel, RunId runId,
+            bool searchMemoryFirst = false, CancellationToken ct = default)
             => throw new InvalidOperationException("kaboom");
     }
 

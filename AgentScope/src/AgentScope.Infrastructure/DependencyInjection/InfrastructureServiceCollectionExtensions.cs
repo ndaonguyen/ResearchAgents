@@ -3,8 +3,10 @@ using AgentScope.Infrastructure.Configuration;
 using AgentScope.Infrastructure.EventBus;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Agents.Filters;
+using AgentScope.Infrastructure.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace AgentScope.Infrastructure.DependencyInjection;
 
@@ -19,6 +21,8 @@ public static class InfrastructureServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddHttpClient();
+
         // The event bus is a singleton — all runs route through it.
         services.AddSingleton<IAgentEventBus, ChannelAgentEventBus>();
 
@@ -31,6 +35,22 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<EventPublishingFunctionFilter>();
 
         services.AddSingleton<IKernelFactory, KernelFactory>();
+
+        // Working memory — Null by default; Qdrant when explicitly enabled in config.
+        // Per-run isolation is handled inside the implementation (Qdrant filters by run_id).
+        var qdrantEnabled = configuration
+            .GetSection(AgentScopeOptions.SectionName)
+            .GetSection(nameof(AgentScopeOptions.Qdrant))
+            .GetValue<bool>(nameof(QdrantOptions.Enabled));
+
+        if (qdrantEnabled)
+        {
+            services.AddSingleton<IWorkingMemory, QdrantWorkingMemory>();
+        }
+        else
+        {
+            services.AddSingleton<IWorkingMemory, NullWorkingMemory>();
+        }
 
         // Sub-agents — scoped per request.
         services.AddScoped<IPlannerAgent, PlannerAgent>();

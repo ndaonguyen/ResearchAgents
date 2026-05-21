@@ -30,23 +30,47 @@ public sealed class ResearcherAgent : IResearcherAgent
 
     private readonly IAgentEventBus _bus;
     private readonly AgentRunContext _runContext;
+    private readonly IWorkingMemory _memory;
     private readonly ILogger<ResearcherAgent> _logger;
 
-    public ResearcherAgent(IAgentEventBus bus, AgentRunContext runContext, ILogger<ResearcherAgent> logger)
+    public ResearcherAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IWorkingMemory memory,
+        ILogger<ResearcherAgent> logger)
     {
         _bus = bus;
         _runContext = runContext;
+        _memory = memory;
         _logger = logger;
     }
 
     public async Task<ResearchSummary> ResearchAsync(
-        string subQuestion, int index, Kernel kernel, RunId runId, CancellationToken ct = default)
+        string subQuestion,
+        int index,
+        Kernel kernel,
+        RunId runId,
+        bool searchMemoryFirst = false,
+        CancellationToken ct = default)
     {
         var agentId = AgentId.Researcher(index);
         using var _ = _runContext.Push(runId, agentId);
 
         await _bus.PublishAsync(new AgentStartedEvent(
             runId, agentId, $"Researcher #{index}: {subQuestion}", DateTime.UtcNow), ct);
+
+        IReadOnlyList<MemoryHit> priorContext = Array.Empty<MemoryHit>();
+        if (searchMemoryFirst)
+        {
+            try
+            {
+                priorContext = await _memory.SearchAsync(runId, subQuestion, k: 3, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Memory search failed for run {RunId} index {Index}; proceeding without prior context", runId, index);
+            }
+        }
 
         var agent = new ChatCompletionAgent
         {
@@ -61,7 +85,7 @@ public sealed class ResearcherAgent : IResearcherAgent
 
         var body = new StringBuilder();
         var thread = new ChatHistoryAgentThread();
-        var userMessage = new ChatMessageContent(AuthorRole.User, subQuestion);
+        var userMessage = new ChatMessageContent(AuthorRole.User, ResearcherPromptBuilder.Build(subQuestion, priorContext));
 
         await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
         {
@@ -73,6 +97,25 @@ public sealed class ResearcherAgent : IResearcherAgent
 
         var summary = new ResearchSummary(subQuestion, body.ToString());
 
+        try
+        {
+            await _memory.SaveAsync(
+                runId,
+                agentId,
+                summary.Body,
+                new Dictionary<string, string>
+                {
+                    ["sub_question"] = summary.SubQuestion,
+                    ["researcher_index"] = index.ToString()
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            // Memory is best-effort — failing to persist must not kill the research output.
+            _logger.LogWarning(ex, "Failed to save research summary to memory for run {RunId} index {Index}", runId, index);
+        }
+
         await _bus.PublishAsync(new AgentFinishedEvent(
             runId, agentId, summary.Body, 0, 0, DateTime.UtcNow), ct);
 
@@ -81,3 +124,26 @@ public sealed class ResearcherAgent : IResearcherAgent
 }
 
 public sealed record ResearchSummary(string SubQuestion, string Body);
+
+public static class ResearcherPromptBuilder
+{
+    /// <summary>
+    /// Builds the researcher's user message. When <paramref name="priorContext"/> is empty,
+    /// returns the sub-question verbatim. Otherwise prepends the prior summaries with an
+    /// instruction to fill gaps rather than restate what's already known.
+    /// </summary>
+    public static string Build(string subQuestion, IReadOnlyList<MemoryHit> priorContext)
+    {
+        if (priorContext.Count == 0) return subQuestion;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Prior research from earlier passes in this run. DO NOT restate these facts — use them as context and focus on what's still missing:");
+        for (var i = 0; i < priorContext.Count; i++)
+        {
+            sb.AppendLine($"[{i + 1}] {priorContext[i].Text}");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"Now answer this sub-question, filling the gap rather than duplicating: {subQuestion}");
+        return sb.ToString();
+    }
+}
