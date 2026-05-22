@@ -83,15 +83,17 @@ When you're stuck, click **💡 Hint** to get a small nudge.
 
 ## Quick-check (MCQ) mode
 
-Pick **Quick check** on the start screen for a single multiple-choice question.
+Pick **Quick check** on the start screen to drill a topic with multiple-choice questions.
 
-- The `QuickCheckAgent` generates one MCQ grounded in the system-design corpus — 4 options, with 1 OR multiple marked correct (the agent decides what's appropriate). Single-correct renders as radios; multi-correct as checkboxes.
+- The `QuickCheckAgent` generates one MCQ at a time, grounded in the system-design corpus — 4 options, with 1 OR multiple marked correct (the agent decides what's appropriate per question). Single-correct renders as radios; multi-correct as checkboxes.
 - Submit → grading is **deterministic** (F1 score over picked vs correct option ids, mapped to 1-5). No LLM call for grading, so this mode is cheap and instant.
-- Results panel reveals which options were correct (green ✓), which of your picks were wrong (red ✗), the explanation, and the book citations. The explanation IS the coaching — same content the discussion-mode coach would give.
+- Results panel reveals which options were correct (green ✓), which of your picks were wrong (red ✗), the explanation, and the book citations.
+- **Drill on the same topic** with the **Next question →** button — generates a fresh MCQ on the same topic without leaving the session. The header shows your question number and running average score (e.g. *"Question 4 · avg 4.2/5"*) once you have more than one question in the session.
+- Hit **End session** when you're done to go back to the topic picker.
 - Discussion-only features (hints, probes, show-answer button) don't apply in quick-check — the question is short and the answer is multiple-choice; either you know it or you don't.
-- Persistence: same Past Runs viewer, but `Variant = "interview-quickcheck"` so you can filter / count separately. `Question` field captures the prompt + all options + which were correct; `Answer` captures your picks; `JudgeScore` is your 1-5; `JudgeReasoning` is the explanation.
+- Persistence: each MCQ becomes its own row in `ui-{yyyyMMdd}.jsonl` with `Variant = "interview-quickcheck"`. Multi-question sessions get unique `QuestionId`s of the shape `{sessionId}-q{n}` so the Past Runs viewer doesn't collapse them. Group rows by the leading `sessionId` to reconstruct a single drilling session.
 
-**When to use quick-check vs discussion:** drill quick-check on a topic until the score stabilises at 4-5 — that's your concept recall. Then run a discussion session on the same topic to test whether you can apply it under pressure. The MCQ is the warmup; the discussion is the rep.
+**When to use quick-check vs discussion:** drill quick-check on a topic until your running average stabilises at 4-5 — that's your concept recall locked in. Then run a discussion session on the same topic to test whether you can apply it under pressure. The MCQ is the warmup; the discussion is the rep.
 
 ## Show answer (give up)
 

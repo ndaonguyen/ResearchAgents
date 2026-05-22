@@ -131,6 +131,24 @@ public sealed class InterviewSessionUseCase
     }
 
     /// <summary>
+    /// Generates the next MCQ on the SAME topic, reusing the existing session. Resets
+    /// <see cref="InterviewSession.Question"/>, <see cref="InterviewSession.Result"/>,
+    /// and <see cref="InterviewSession.FinalGrade"/> — but keeps the session ID, so the
+    /// UI can track question-count across a single drilling streak.
+    /// </summary>
+    public async Task NextQuickCheckQuestionAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        if (session.Mode != InterviewMode.QuickCheck) return;
+
+        var (question, _) = await _quickCheck.GenerateAsync(session.Topic, runId, ct);
+        session.Question = question;
+        session.Result = null;
+        session.FinalGrade = null;
+        session.FinalCoaching = null;
+    }
+
+    /// <summary>
     /// Grades a QuickCheck submission and finalises the session. Score is computed from
     /// the F1 of <paramref name="selectedIds"/> vs the correct option ids, mapped to 1-5.
     /// The MCQ's explanation becomes the coaching summary. No grader/coach LLM calls —

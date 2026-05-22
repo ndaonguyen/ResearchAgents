@@ -72,7 +72,10 @@
     {
         <section class="mcq">
             <div class="mcq-question">
-                <div class="speaker">Quick check — @_session.Topic.DisplayName</div>
+                <div class="speaker">
+                    Quick check — @_session.Topic.DisplayName
+                    <span class="mcq-counter">Question @_questionIndex@(_questionIndex > 1 ? $" · avg {AverageScore:F1}/5" : "")</span>
+                </div>
                 <div class="text">@_session.Question.Question</div>
             </div>
 
@@ -143,7 +146,12 @@
                             }
                         </ul>
                     }
-                    <button @onclick="ResetSession">Start a new interview</button>
+                    <div class="mcq-actions">
+                        <button class="primary" @onclick="NextQuickCheckQuestion" disabled="@_busy">
+                            @(_busy ? "Loading…" : "Next question →")
+                        </button>
+                        <button @onclick="ResetSession" disabled="@_busy">End session</button>
+                    </div>
                 </div>
             }
         </section>
@@ -340,7 +348,9 @@
 
     .mcq { display: flex; flex-direction: column; gap: 16px; }
     .mcq-question { padding: 16px 18px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; }
-    .mcq-question .speaker { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #1e40af; margin-bottom: 8px; }
+    .mcq-question .speaker { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #1e40af; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .mcq-counter { font-size: 0.75rem; color: #64748b; font-weight: 500; text-transform: none; letter-spacing: 0; }
+    .mcq-actions { display: flex; gap: 12px; margin-top: 18px; }
     .mcq-question .text { font-size: 1.05rem; line-height: 1.5; }
     .mcq-options { display: flex; flex-direction: column; gap: 8px; }
     .mcq-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: white; }
@@ -373,6 +383,11 @@
     private bool _busy;
 
     private readonly HashSet<string> _picked = new();
+
+    // QuickCheck-only: which question number within this run we're on (1-based) and the
+    // running tally of scores so we can show "3 questions, avg 4.3" after the session.
+    private int _questionIndex = 0;
+    private int _totalScore = 0;
 
     private string? _currentAgentMessage;
     private string _currentAgentLabel = "";
@@ -525,6 +540,8 @@
         _busy = true;
         _runId = RunId.New();
         _picked.Clear();
+        _questionIndex = _selectedMode == InterviewMode.QuickCheck ? 1 : 0;
+        _totalScore = 0;
         StartEventSubscription(_runId);
         StateHasChanged();
 
@@ -549,6 +566,30 @@
         }
     }
 
+    private async Task NextQuickCheckQuestion()
+    {
+        if (_session is null || _session.Mode != InterviewMode.QuickCheck) return;
+
+        _busy = true;
+        _picked.Clear();
+        _runId = RunId.New();
+        _questionIndex++;
+        StartEventSubscription(_runId);
+        StateHasChanged();
+
+        try
+        {
+            await Session.NextQuickCheckQuestionAsync(_session, _runId);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private double AverageScore => _questionIndex <= 1 ? 0.0 : (double)_totalScore / Math.Max(1, _questionIndex - 1);
+
     private void SelectSingle(string optionId)
     {
         _picked.Clear();
@@ -570,6 +611,7 @@
         try
         {
             await Session.SubmitQuickCheckAnswerAsync(_session, _picked.ToList(), _runId);
+            if (_session.FinalGrade is { } g) _totalScore += g.Score;
             await PersistSessionAsync();
         }
         finally
@@ -631,6 +673,8 @@
         _sttError = null;
         _currentAgentMessage = null;
         _picked.Clear();
+        _questionIndex = 0;
+        _totalScore = 0;
         if (_listening && _sttModule is not null)
         {
             try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
@@ -690,7 +734,7 @@
             variant = "interview-quickcheck";
             var optionsText = string.Join("\n", _session.Question.Options.Select(o =>
                 $"  ({o.Id.ToUpperInvariant()}) {o.Text}{(o.IsCorrect ? "  [correct]" : "")}"));
-            questionField = $"[{_session.Topic.DisplayName}] {_session.Question.Question}\n{optionsText}";
+            questionField = $"[{_session.Topic.DisplayName}] Q{_questionIndex}: {_session.Question.Question}\n{optionsText}";
 
             var picked = _session.Result?.SelectedIds is { } sel
                 ? string.Join(", ", sel.Select(id => id.ToUpperInvariant()))
@@ -709,8 +753,14 @@
             ? c.Summary + (c.SuggestedReading.Count > 0 ? "\n\nSuggested reading:\n  - " + string.Join("\n  - ", c.SuggestedReading) : "")
             : null;
 
+        // For QuickCheck multi-question sessions, give each question a unique id so the
+        // Past Runs viewer doesn't collapse them. Discussion sessions are one row per session.
+        var questionId = _session.Mode == InterviewMode.QuickCheck
+            ? $"{_session.SessionId}-q{_questionIndex}"
+            : _session.SessionId;
+
         var row = new EvalRow(
-            QuestionId: _session.SessionId,
+            QuestionId: questionId,
             Variant: variant,
             Question: questionField,
             RunId: _runId.Value,
