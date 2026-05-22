@@ -50,6 +50,18 @@ public interface IModelAnswerAgent
 }
 
 /// <summary>
+/// Generates a single multiple-choice question for "quick check" mode. The agent uses
+/// the system-design corpus to pick a concept that's actually covered, generates 4-5
+/// plausible options, marks which are correct (one OR multiple), and writes an
+/// explanation citing the source chunks.
+/// </summary>
+public interface IQuickCheckAgent
+{
+    Task<(MultipleChoiceQuestion Question, AgentUsage Usage)> GenerateAsync(
+        InterviewTopic topic, RunId runId, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Scores the candidate's transcript on a 1-5 scale, producing a list of strengths and
 /// gaps. Implementations should call the system-design corpus to ground gaps in
 /// specific book content (e.g. "missed write-through vs write-behind, ByteByteGo p. 76").

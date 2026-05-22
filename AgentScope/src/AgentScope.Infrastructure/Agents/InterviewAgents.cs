@@ -409,6 +409,176 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
     }
 }
 
+public sealed class QuickCheckAgent : IQuickCheckAgent
+{
+    private const string SystemPrompt = """
+        You generate ONE multiple-choice question on the given system-design topic for a
+        quick concept check.
+
+        Rules:
+        - Use SystemDesignCorpus.Search to find what the books actually cover on this topic,
+          and pin the question to a real concept (not vague trivia).
+        - 4 options. Mix concrete facts with plausible-but-wrong distractors.
+        - Correct count is 1 OR more — pick what's appropriate for the concept. Some questions
+          are clean single-answer (e.g. "Which is the *primary* purpose of consistent hashing?"),
+          others are "select all that apply" (e.g. "Which of the following are properties of X?").
+        - The Explanation must justify the correct answers AND briefly say why the wrong ones
+          are wrong. Cite book + page range inline.
+        - Output JSON only:
+          {
+            "question": "<question text, include '(Select all that apply.)' if multi-correct>",
+            "options": [
+              {"id": "a", "text": "<option text>", "correct": true|false},
+              {"id": "b", "text": "<option text>", "correct": true|false},
+              {"id": "c", "text": "<option text>", "correct": true|false},
+              {"id": "d", "text": "<option text>", "correct": true|false}
+            ],
+            "explanation": "<2-3 sentences justifying correct + dismissing wrong, with citation>",
+            "citations": ["<Book Name, pp. X-Y>"]
+          }
+        - At least one option must be correct. No commentary outside the JSON.
+        """;
+
+    private readonly IAgentEventBus _bus;
+    private readonly AgentRunContext _runContext;
+    private readonly IKernelFactory _kernelFactory;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
+    private readonly ILogger<QuickCheckAgent> _logger;
+
+    public QuickCheckAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IKernelFactory kernelFactory,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
+        ILogger<QuickCheckAgent> logger)
+    {
+        _bus = bus;
+        _runContext = runContext;
+        _kernelFactory = kernelFactory;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
+        _logger = logger;
+    }
+
+    public async Task<(MultipleChoiceQuestion Question, AgentUsage Usage)> GenerateAsync(
+        InterviewTopic topic, RunId runId, CancellationToken ct = default)
+    {
+        var agentId = AgentId.QuickCheck;
+        using var _ = _runContext.Push(runId, agentId);
+
+        await _bus.PublishAsync(new AgentStartedEvent(runId, agentId, "Quick Check", DateTime.UtcNow), ct);
+
+        var kernel = _kernelFactory.Create();
+        var agent = new ChatCompletionAgent
+        {
+            Name = "QuickCheck",
+            Instructions = SystemPrompt,
+            Kernel = kernel,
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(
+                responseFormat: "json_object",
+                functionChoice: FunctionChoiceBehavior.Auto()))
+        };
+
+        var userMessage = new ChatMessageContent(AuthorRole.User,
+            $"Topic: {topic.DisplayName}\n\nGenerate one MCQ on this topic.");
+
+        var sb = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
+        var thread = new ChatHistoryAgentThread();
+
+        await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
+        {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+            var delta = update.Message.Content;
+            if (string.IsNullOrEmpty(delta)) continue;
+            sb.Append(delta);
+            await _bus.PublishAsync(new AgentTokenEvent(runId, agentId, delta, DateTime.UtcNow), ct);
+        }
+
+        var json = sb.ToString();
+        var question = ParseQuestion(json);
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, agentId, question.Question, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
+
+        return (question, usage);
+    }
+
+    internal static MultipleChoiceQuestion ParseQuestion(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var question = root.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String
+                ? q.GetString() ?? ""
+                : "(question text missing)";
+
+            var options = new List<MultipleChoiceOption>();
+            if (root.TryGetProperty("options", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arr.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    var id = item.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                        ? idEl.GetString() ?? ""
+                        : Guid.NewGuid().ToString("N")[..1];
+                    var text = item.TryGetProperty("text", out var tEl) && tEl.ValueKind == JsonValueKind.String
+                        ? tEl.GetString() ?? ""
+                        : "";
+                    var correct = item.TryGetProperty("correct", out var cEl) && cEl.ValueKind == JsonValueKind.True;
+                    if (!string.IsNullOrWhiteSpace(text))
+                        options.Add(new MultipleChoiceOption(id, text, correct));
+                }
+            }
+
+            var explanation = root.TryGetProperty("explanation", out var e) && e.ValueKind == JsonValueKind.String
+                ? e.GetString() ?? ""
+                : "";
+
+            var citations = ReadStringArray(root, "citations");
+
+            // Safety: if the agent forgot to mark any option correct, mark the first one so
+            // the user can at least see a result instead of a stuck UI.
+            if (options.Count > 0 && options.All(o => !o.IsCorrect))
+            {
+                options[0] = options[0] with { IsCorrect = true };
+            }
+
+            return new MultipleChoiceQuestion(question, options, explanation, citations);
+        }
+        catch (JsonException)
+        {
+            return new MultipleChoiceQuestion(
+                "Quick-check output was not valid JSON.",
+                Array.Empty<MultipleChoiceOption>(),
+                "",
+                Array.Empty<string>());
+        }
+    }
+
+    private static IReadOnlyList<string> ReadStringArray(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return Array.Empty<string>();
+        var list = new List<string>(arr.GetArrayLength());
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                var v = item.GetString();
+                if (!string.IsNullOrWhiteSpace(v)) list.Add(v);
+            }
+        }
+        return list;
+    }
+}
+
 public sealed class GraderAgent : IGraderAgent
 {
     private const string SystemPrompt = """

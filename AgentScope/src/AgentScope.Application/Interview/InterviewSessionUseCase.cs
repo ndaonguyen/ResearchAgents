@@ -29,6 +29,7 @@ public sealed class InterviewSessionUseCase
     private readonly IProbeAgent _probe;
     private readonly IHintAgent _hint;
     private readonly IModelAnswerAgent _modelAnswer;
+    private readonly IQuickCheckAgent _quickCheck;
     private readonly IGraderAgent _grader;
     private readonly ICoachAgent _coach;
     private readonly IAgentEventBus _bus;
@@ -39,6 +40,7 @@ public sealed class InterviewSessionUseCase
         IProbeAgent probe,
         IHintAgent hint,
         IModelAnswerAgent modelAnswer,
+        IQuickCheckAgent quickCheck,
         IGraderAgent grader,
         ICoachAgent coach,
         IAgentEventBus bus,
@@ -48,6 +50,7 @@ public sealed class InterviewSessionUseCase
         _probe = probe;
         _hint = hint;
         _modelAnswer = modelAnswer;
+        _quickCheck = quickCheck;
         _grader = grader;
         _coach = coach;
         _bus = bus;
@@ -110,6 +113,91 @@ public sealed class InterviewSessionUseCase
 
         session.Transcript.Add(new InterviewTurn(Speaker.Hint, hint, DateTime.UtcNow));
         return hint;
+    }
+
+    /// <summary>
+    /// Starts a QuickCheck (MCQ) session. Generates one RAG-grounded multiple-choice
+    /// question, attaches it to a new <see cref="InterviewSession"/> in <see cref="InterviewMode.QuickCheck"/> mode,
+    /// and returns the session. The caller renders the question and posts the picks back
+    /// through <see cref="SubmitQuickCheckAnswerAsync"/>.
+    /// </summary>
+    public async Task<InterviewSession> StartQuickCheckAsync(
+        InterviewTopic topic, RunId runId, CancellationToken ct = default)
+    {
+        var session = new InterviewSession(Guid.NewGuid().ToString("N"), topic, InterviewMode.QuickCheck);
+        var (question, _) = await _quickCheck.GenerateAsync(topic, runId, ct);
+        session.Question = question;
+        return session;
+    }
+
+    /// <summary>
+    /// Grades a QuickCheck submission and finalises the session. Score is computed from
+    /// the F1 of <paramref name="selectedIds"/> vs the correct option ids, mapped to 1-5.
+    /// The MCQ's explanation becomes the coaching summary. No grader/coach LLM calls —
+    /// pure deterministic scoring keeps cost trivial for quick checks.
+    /// </summary>
+    public async Task SubmitQuickCheckAnswerAsync(
+        InterviewSession session,
+        IReadOnlyList<string> selectedIds,
+        RunId runId,
+        CancellationToken ct = default)
+    {
+        if (session.Question is null) return;
+
+        var correct = session.Question.Options.Where(o => o.IsCorrect).Select(o => o.Id).ToHashSet();
+        var picked = selectedIds.ToHashSet();
+
+        var tp = picked.Intersect(correct).Count();
+        var fp = picked.Except(correct).Count();
+        var fn = correct.Except(picked).Count();
+
+        var precision = (tp + fp) == 0 ? 0.0 : (double)tp / (tp + fp);
+        var recall = (tp + fn) == 0 ? 0.0 : (double)tp / (tp + fn);
+        var f1 = (precision + recall) == 0 ? 0.0 : 2 * precision * recall / (precision + recall);
+
+        var score = f1 switch
+        {
+            >= 0.95 => 5,
+            >= 0.70 => 4,
+            >= 0.50 => 3,
+            >= 0.30 => 2,
+            _       => 1
+        };
+
+        session.Result = new ChoiceResult(selectedIds, correct.ToList(), score);
+        session.FinalGrade = new Grade(
+            Score: score,
+            Strengths: tp > 0 ? new[] { $"Got {tp} of {correct.Count} correct option(s)." } : Array.Empty<string>(),
+            Gaps: BuildGaps(session.Question, correct, picked));
+        session.FinalCoaching = new Coaching(
+            Summary: session.Question.Explanation,
+            SuggestedReading: session.Question.Citations);
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, AgentId.System, session.Question.Explanation,
+            TokensIn: 0, TokensOut: 0, EstimatedCostUsd: null,
+            DateTime.UtcNow), ct);
+    }
+
+    private static IReadOnlyList<string> BuildGaps(
+        MultipleChoiceQuestion q,
+        IReadOnlySet<string> correct,
+        IReadOnlySet<string> picked)
+    {
+        var gaps = new List<string>();
+        var missed = correct.Except(picked).ToList();
+        var wrong = picked.Except(correct).ToList();
+        foreach (var id in missed)
+        {
+            var opt = q.Options.FirstOrDefault(o => o.Id == id);
+            if (opt is not null) gaps.Add($"Missed correct option ({id}): {opt.Text}");
+        }
+        foreach (var id in wrong)
+        {
+            var opt = q.Options.FirstOrDefault(o => o.Id == id);
+            if (opt is not null) gaps.Add($"Picked incorrect option ({id}): {opt.Text}");
+        }
+        return gaps;
     }
 
     /// <summary>

@@ -70,6 +70,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IProbeAgent, ProbeAgent>();
         services.AddScoped<IHintAgent, HintAgent>();
         services.AddScoped<IModelAnswerAgent, ModelAnswerAgent>();
+        services.AddScoped<IQuickCheckAgent, QuickCheckAgent>();
         services.AddScoped<IGraderAgent, GraderAgent>();
         services.AddScoped<ICoachAgent, CoachAgent>();
 

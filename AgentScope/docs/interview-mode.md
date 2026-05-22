@@ -2,6 +2,17 @@
 
 A second orchestrator on top of the same multi-agent infrastructure, repurposed as an AI interviewer that grounds questions and feedback in the system-design book corpus. Lives at `/interview` in the web app.
 
+## Two modes
+
+Pick the mode on the start screen:
+
+| Mode | What it is | Best for |
+|---|---|---|
+| **Discussion** | Long-form, multi-turn interview. Interviewer asks an open question, you answer, probe agent presses on weaknesses, grader scores 1-5 with citations, coach gives feedback. Hints + Show answer available. | Practising depth, trade-off reasoning, verbal walk-throughs. |
+| **Quick check** | One multiple-choice question (single OR multi-select, the agent decides per question). Submit picks → instant grade + RAG-grounded explanation. No probes, no coach. | Concept recall, fast review, drilling specific topics. |
+
+Both modes share the topic picker, the RAG corpus, the persistence layer, and the Past Runs page.
+
 ## The flow
 
 ```
@@ -69,6 +80,18 @@ When you're stuck, click **💡 Hint** to get a small nudge.
 - **Capped at 2 per session.** The button shows `(N left)` once you've used at least one and disables when you're out.
 - Hints appear as their own purple turn in the transcript. The grader sees them, so over-asking will likely cost you score points — a soft penalty that mirrors a real interview where asking for help is allowed but noted.
 - TTS speaks hints aloud too if voice is enabled.
+
+## Quick-check (MCQ) mode
+
+Pick **Quick check** on the start screen for a single multiple-choice question.
+
+- The `QuickCheckAgent` generates one MCQ grounded in the system-design corpus — 4 options, with 1 OR multiple marked correct (the agent decides what's appropriate). Single-correct renders as radios; multi-correct as checkboxes.
+- Submit → grading is **deterministic** (F1 score over picked vs correct option ids, mapped to 1-5). No LLM call for grading, so this mode is cheap and instant.
+- Results panel reveals which options were correct (green ✓), which of your picks were wrong (red ✗), the explanation, and the book citations. The explanation IS the coaching — same content the discussion-mode coach would give.
+- Discussion-only features (hints, probes, show-answer button) don't apply in quick-check — the question is short and the answer is multiple-choice; either you know it or you don't.
+- Persistence: same Past Runs viewer, but `Variant = "interview-quickcheck"` so you can filter / count separately. `Question` field captures the prompt + all options + which were correct; `Answer` captures your picks; `JudgeScore` is your 1-5; `JudgeReasoning` is the explanation.
+
+**When to use quick-check vs discussion:** drill quick-check on a topic until the score stabilises at 4-5 — that's your concept recall. Then run a discussion session on the same topic to test whether you can apply it under pressure. The MCQ is the warmup; the discussion is the rep.
 
 ## Show answer (give up)
 

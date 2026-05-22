@@ -37,22 +37,38 @@ public sealed record InterviewTopic(string Id, string DisplayName, TopicGroup Gr
 public enum TopicGroup { Concept, Exercise }
 
 /// <summary>
-/// The full state of one interview session. Mutated turn-by-turn by the orchestrator;
-/// each successive turn appends to <see cref="Transcript"/>.
+/// Two question formats. <see cref="Discussion"/> is the full multi-turn interview with
+/// probes/hints/grader/coach. <see cref="QuickCheck"/> is a single multiple-choice
+/// question — same RAG grounding, no conversation, instant pass/fail-style score.
+/// </summary>
+public enum InterviewMode { Discussion, QuickCheck }
+
+/// <summary>
+/// The full state of one interview session. <see cref="Mode"/> decides which fields are used:
+/// <list type="bullet">
+///   <item>Discussion → <see cref="Transcript"/>, <see cref="FinalGrade"/>, <see cref="FinalCoaching"/></item>
+///   <item>QuickCheck → <see cref="Question"/>, <see cref="Result"/>, <see cref="FinalGrade"/> (1-5 derived from picks)</item>
+/// </list>
 /// </summary>
 public sealed class InterviewSession
 {
     public string SessionId { get; }
     public InterviewTopic Topic { get; }
+    public InterviewMode Mode { get; }
     public DateTime StartedAtUtc { get; }
     public List<InterviewTurn> Transcript { get; } = new();
     public Grade? FinalGrade { get; set; }
     public Coaching? FinalCoaching { get; set; }
 
-    public InterviewSession(string sessionId, InterviewTopic topic)
+    // QuickCheck-only.
+    public MultipleChoiceQuestion? Question { get; set; }
+    public ChoiceResult? Result { get; set; }
+
+    public InterviewSession(string sessionId, InterviewTopic topic, InterviewMode mode = InterviewMode.Discussion)
     {
         SessionId = sessionId;
         Topic = topic;
+        Mode = mode;
         StartedAtUtc = DateTime.UtcNow;
     }
 }
@@ -68,3 +84,30 @@ public enum Speaker { Interviewer, User, Probe, Hint, ModelAnswer }
 public sealed record Grade(int Score, IReadOnlyList<string> Strengths, IReadOnlyList<string> Gaps);
 
 public sealed record Coaching(string Summary, IReadOnlyList<string> SuggestedReading);
+
+/// <summary>
+/// One MCQ option. <see cref="Id"/> is a short stable handle (e.g. "a", "b", "c", "d")
+/// so the UI can render checkboxes/radios and post back exactly which options were picked.
+/// </summary>
+public sealed record MultipleChoiceOption(string Id, string Text, bool IsCorrect);
+
+/// <summary>
+/// A complete MCQ with one or more correct options. When <see cref="CorrectCount"/> is 1,
+/// the UI renders radio buttons; otherwise checkboxes (multi-select).
+/// </summary>
+public sealed record MultipleChoiceQuestion(
+    string Question,
+    IReadOnlyList<MultipleChoiceOption> Options,
+    string Explanation,
+    IReadOnlyList<string> Citations)
+{
+    public int CorrectCount => Options.Count(o => o.IsCorrect);
+}
+
+/// <summary>
+/// The candidate's submission + grading outcome for an MCQ.
+/// </summary>
+public sealed record ChoiceResult(
+    IReadOnlyList<string> SelectedIds,
+    IReadOnlyList<string> CorrectIds,
+    int Score);

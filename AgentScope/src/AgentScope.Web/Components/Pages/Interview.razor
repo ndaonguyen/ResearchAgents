@@ -45,9 +45,107 @@
                     }
                 </optgroup>
             </select>
+
+            <div class="mode-picker">
+                <label class="mode-option">
+                    <input type="radio" name="mode" value="discussion"
+                           checked="@(_selectedMode == InterviewMode.Discussion)"
+                           @onchange="@(() => _selectedMode = InterviewMode.Discussion)"
+                           disabled="@_busy" />
+                    Discussion (long-form, multi-turn)
+                </label>
+                <label class="mode-option">
+                    <input type="radio" name="mode" value="quickcheck"
+                           checked="@(_selectedMode == InterviewMode.QuickCheck)"
+                           @onchange="@(() => _selectedMode = InterviewMode.QuickCheck)"
+                           disabled="@_busy" />
+                    Quick check (one multiple-choice question)
+                </label>
+            </div>
+
             <button class="primary" @onclick="StartSession" disabled="@_busy">
                 @(_busy ? "Starting…" : "Start interview")
             </button>
+        </section>
+    }
+    else if (_session.Mode == InterviewMode.QuickCheck && _session.Question is not null)
+    {
+        <section class="mcq">
+            <div class="mcq-question">
+                <div class="speaker">Quick check — @_session.Topic.DisplayName</div>
+                <div class="text">@_session.Question.Question</div>
+            </div>
+
+            <div class="mcq-options">
+                @foreach (var opt in _session.Question.Options)
+                {
+                    var isSingle = _session.Question.CorrectCount == 1;
+                    var picked = _picked.Contains(opt.Id);
+                    var disabled = _session.Result is not null;
+                    var resultClass = "";
+                    if (_session.Result is not null)
+                    {
+                        if (opt.IsCorrect) resultClass = "correct";
+                        else if (picked) resultClass = "wrong";
+                    }
+                    <label class="mcq-option @(picked ? "picked" : "") @resultClass">
+                        @if (isSingle)
+                        {
+                            <input type="radio" name="mcq" value="@opt.Id"
+                                   checked="@picked"
+                                   @onchange="@(() => SelectSingle(opt.Id))"
+                                   disabled="@disabled" />
+                        }
+                        else
+                        {
+                            <input type="checkbox" value="@opt.Id"
+                                   checked="@picked"
+                                   @onchange="@(() => ToggleMulti(opt.Id))"
+                                   disabled="@disabled" />
+                        }
+                        <span class="opt-id">@opt.Id.ToUpperInvariant().</span>
+                        <span class="opt-text">@opt.Text</span>
+                        @if (_session.Result is not null && opt.IsCorrect)
+                        {
+                            <span class="opt-marker">✓</span>
+                        }
+                        @if (_session.Result is not null && !opt.IsCorrect && picked)
+                        {
+                            <span class="opt-marker wrong">✗</span>
+                        }
+                    </label>
+                }
+            </div>
+
+            @if (_session.Result is null)
+            {
+                <button class="primary" @onclick="SubmitQuickCheck"
+                        disabled="@(_busy || _picked.Count == 0)">
+                    @(_busy ? "Grading…" : "Submit")
+                </button>
+            }
+            else
+            {
+                <div class="mcq-result">
+                    <div class="score-row">
+                        <h2>Score</h2>
+                        <div class="score-badge score-@_session.FinalGrade!.Score">@_session.FinalGrade.Score / 5</div>
+                    </div>
+                    <h3>Explanation</h3>
+                    <p>@_session.Question.Explanation</p>
+                    @if (_session.Question.Citations.Any())
+                    {
+                        <h4>Sources</h4>
+                        <ul>
+                            @foreach (var c in _session.Question.Citations)
+                            {
+                                <li>@c</li>
+                            }
+                        </ul>
+                    }
+                    <button @onclick="ResetSession">Start a new interview</button>
+                </div>
+            }
         </section>
     }
     else
@@ -177,8 +275,11 @@
     h1 { margin: 0; font-size: 1.6rem; }
     .subtitle { color: #666; font-size: 0.9rem; }
 
-    .topic-picker { display: flex; align-items: center; gap: 12px; padding: 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .topic-picker { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding: 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
     .topic-picker select { padding: 8px 12px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 280px; }
+    .mode-picker { display: flex; flex-direction: column; gap: 8px; }
+    .mode-option { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.95rem; }
+    .mode-option input { cursor: pointer; }
     button.primary { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; font-size: 1rem; }
     button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
     button.mute-toggle { margin-left: auto; padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
@@ -236,16 +337,42 @@
     .grade-card .reading li { color: #475569; }
     .grade-card button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; }
     .grade-card button:hover { background: #f1f5f9; }
+
+    .mcq { display: flex; flex-direction: column; gap: 16px; }
+    .mcq-question { padding: 16px 18px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; }
+    .mcq-question .speaker { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #1e40af; margin-bottom: 8px; }
+    .mcq-question .text { font-size: 1.05rem; line-height: 1.5; }
+    .mcq-options { display: flex; flex-direction: column; gap: 8px; }
+    .mcq-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: white; }
+    .mcq-option:hover:not(.correct):not(.wrong) { background: #f8fafc; border-color: #cbd5e1; }
+    .mcq-option.picked { border-color: #2563eb; background: #eff6ff; }
+    .mcq-option.correct { border-color: #34d399; background: #f0fdf4; }
+    .mcq-option.wrong { border-color: #f87171; background: #fef2f2; }
+    .mcq-option input { margin-top: 2px; cursor: pointer; }
+    .mcq-option .opt-id { font-weight: 700; color: #475569; margin-right: 4px; }
+    .mcq-option .opt-text { flex: 1; }
+    .mcq-option .opt-marker { font-weight: 700; color: #16a34a; }
+    .mcq-option .opt-marker.wrong { color: #dc2626; }
+    .mcq-result { padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .mcq-result .score-row { display: flex; justify-content: space-between; align-items: center; }
+    .mcq-result h3 { margin-top: 16px; font-size: 1rem; color: #475569; }
+    .mcq-result h4 { margin-top: 12px; font-size: 0.85rem; color: #64748b; }
+    .mcq-result p { line-height: 1.6; }
+    .mcq-result button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; }
+    .mcq-result button:hover { background: #f1f5f9; }
 </style>
 
 @code {
     private readonly IReadOnlyList<InterviewTopic> _topics = InterviewTopics.All;
     private string _selectedTopicId = "caching";
+    private InterviewMode _selectedMode = InterviewMode.Discussion;
 
     private InterviewSession? _session;
     private RunId _runId;
     private string _userInput = "";
     private bool _busy;
+
+    private readonly HashSet<string> _picked = new();
 
     private string? _currentAgentMessage;
     private string _currentAgentLabel = "";
@@ -397,12 +524,15 @@
 
         _busy = true;
         _runId = RunId.New();
+        _picked.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
 
         try
         {
-            _session = await Session.StartAsync(topic, _runId);
+            _session = _selectedMode == InterviewMode.QuickCheck
+                ? await Session.StartQuickCheckAsync(topic, _runId)
+                : await Session.StartAsync(topic, _runId);
         }
         finally
         {
@@ -411,7 +541,42 @@
             StateHasChanged();
         }
 
-        await SpeakLatestInterviewerTurnAsync();
+        // QuickCheck doesn't have an interviewer-spoken turn (the question is on-screen);
+        // Discussion mode does.
+        if (_session?.Mode == InterviewMode.Discussion)
+        {
+            await SpeakLatestInterviewerTurnAsync();
+        }
+    }
+
+    private void SelectSingle(string optionId)
+    {
+        _picked.Clear();
+        _picked.Add(optionId);
+    }
+
+    private void ToggleMulti(string optionId)
+    {
+        if (!_picked.Add(optionId)) _picked.Remove(optionId);
+    }
+
+    private async Task SubmitQuickCheck()
+    {
+        if (_session is null || _session.Question is null || _picked.Count == 0) return;
+
+        _busy = true;
+        StateHasChanged();
+
+        try
+        {
+            await Session.SubmitQuickCheckAnswerAsync(_session, _picked.ToList(), _runId);
+            await PersistSessionAsync();
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
     }
 
     private async Task SubmitAnswer()
@@ -465,6 +630,7 @@
         _interimTranscript = "";
         _sttError = null;
         _currentAgentMessage = null;
+        _picked.Clear();
         if (_listening && _sttModule is not null)
         {
             try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
@@ -515,8 +681,29 @@
     {
         if (_session?.FinalGrade is null) return;
 
-        var transcript = string.Join("\n\n",
-            _session.Transcript.Select(t => $"[{t.Speaker}] {t.Text}"));
+        string variant;
+        string questionField;
+        string answerField;
+
+        if (_session.Mode == InterviewMode.QuickCheck && _session.Question is not null)
+        {
+            variant = "interview-quickcheck";
+            var optionsText = string.Join("\n", _session.Question.Options.Select(o =>
+                $"  ({o.Id.ToUpperInvariant()}) {o.Text}{(o.IsCorrect ? "  [correct]" : "")}"));
+            questionField = $"[{_session.Topic.DisplayName}] {_session.Question.Question}\n{optionsText}";
+
+            var picked = _session.Result?.SelectedIds is { } sel
+                ? string.Join(", ", sel.Select(id => id.ToUpperInvariant()))
+                : "(no selection)";
+            answerField = $"Picked: {picked}";
+        }
+        else
+        {
+            variant = "interview";
+            questionField = $"[{_session.Topic.DisplayName}] {_session.Transcript.FirstOrDefault()?.Text ?? ""}";
+            answerField = string.Join("\n\n",
+                _session.Transcript.Select(t => $"[{t.Speaker}] {t.Text}"));
+        }
 
         var coaching = _session.FinalCoaching is { } c
             ? c.Summary + (c.SuggestedReading.Count > 0 ? "\n\nSuggested reading:\n  - " + string.Join("\n  - ", c.SuggestedReading) : "")
@@ -524,10 +711,10 @@
 
         var row = new EvalRow(
             QuestionId: _session.SessionId,
-            Variant: "interview",
-            Question: $"[{_session.Topic.DisplayName}] {_session.Transcript.FirstOrDefault()?.Text ?? ""}",
+            Variant: variant,
+            Question: questionField,
             RunId: _runId.Value,
-            Answer: transcript,
+            Answer: answerField,
             TokensIn: 0,
             TokensOut: 0,
             CostUsd: null,
