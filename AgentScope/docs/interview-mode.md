@@ -56,6 +56,18 @@ Four agents (`Interviewer`, `Probe`, `Grader`, `Coach`) share the same shape as 
 
 8. Click **Start a new interview** to pick another topic.
 
+## Voice (TTS)
+
+The interviewer's question and any probe follow-ups are read aloud automatically using the browser's built-in `SpeechSynthesis` API — no API key, no cost, runs entirely client-side.
+
+- A **🔊 Voice on / 🔇 Voice off** toggle in the page header lets you mute at any time. State applies to the current tab session.
+- Speech triggers when a new interviewer or probe turn is added to the transcript — never on your own answers, never on the grade/coach feedback.
+- Voice quality depends on the browser + OS combination. Chrome on macOS and Edge on Windows have the most natural defaults; older Firefox or Linux setups may sound robotic.
+- If the browser doesn't expose `SpeechSynthesis` (rare), the toggle hides and the page falls back to text-only silently.
+- Autoplay note: browsers gate audio behind user interaction. The Start button counts as that interaction, so all subsequent turns within the session play without prompting.
+
+To upgrade to OpenAI's TTS (better voices, costs cents per session), swap `wwwroot/js/interview-tts.js` for a call to a server endpoint that returns audio bytes from OpenAI's `/v1/audio/speech` API. Out of scope for v1.
+
 ## What gets persisted
 
 Each completed session writes one row to the same `results/ui-{yyyyMMdd}.jsonl` the UI runs go to, with:

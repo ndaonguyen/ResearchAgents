@@ -10,6 +10,7 @@
 @inject InterviewSessionUseCase Session
 @inject IAgentEventBus Bus
 @inject RunPersister Persister
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <PageTitle>ResearchAgent — Interview practice</PageTitle>
@@ -18,6 +19,12 @@
     <header>
         <h1>Interview practice</h1>
         <span class="subtitle">System design — grounded in your indexed book corpus</span>
+        @if (_ttsAvailable)
+        {
+            <button class="mute-toggle" @onclick="ToggleMute" title="@(_muted ? "Unmute" : "Mute")">
+                @(_muted ? "🔇 Voice off" : "🔊 Voice on")
+            </button>
+        }
     </header>
 
     @if (_session is null)
@@ -138,6 +145,8 @@
     .topic-picker select { padding: 8px 12px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 280px; }
     button.primary { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; font-size: 1rem; }
     button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    button.mute-toggle { margin-left: auto; padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    button.mute-toggle:hover { background: #f8fafc; }
 
     .transcript { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
     .turn { padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
@@ -188,6 +197,55 @@
 
     private CancellationTokenSource? _subscriptionCts;
 
+    private IJSObjectReference? _ttsModule;
+    private bool _ttsAvailable;
+    private bool _muted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _ttsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/interview-tts.js");
+            _ttsAvailable = await _ttsModule.InvokeAsync<bool>("isAvailable");
+            if (_ttsAvailable) StateHasChanged();
+        }
+        catch
+        {
+            // SSR pre-render or JS unavailable — leave _ttsAvailable false; mute toggle simply hides.
+            _ttsAvailable = false;
+        }
+    }
+
+    private void ToggleMute()
+    {
+        _muted = !_muted;
+        if (_muted) _ = CancelSpeechAsync();
+    }
+
+    private async Task SpeakLatestInterviewerTurnAsync()
+    {
+        if (_muted || !_ttsAvailable || _ttsModule is null || _session is null) return;
+        var last = _session.Transcript.LastOrDefault();
+        if (last is null) return;
+        if (last.Speaker != Speaker.Interviewer && last.Speaker != Speaker.Probe) return;
+
+        try
+        {
+            await _ttsModule.InvokeVoidAsync("speak", last.Text);
+        }
+        catch
+        {
+            // Speech failures are non-fatal; the user can still read the question.
+        }
+    }
+
+    private async Task CancelSpeechAsync()
+    {
+        if (_ttsModule is null) return;
+        try { await _ttsModule.InvokeVoidAsync("cancel"); } catch { /* circuit may be closing */ }
+    }
+
     private async Task StartSession()
     {
         var topic = InterviewTopics.FindById(_selectedTopicId);
@@ -208,6 +266,8 @@
             _currentAgentMessage = null;
             StateHasChanged();
         }
+
+        await SpeakLatestInterviewerTurnAsync();
     }
 
     private async Task SubmitAnswer()
@@ -219,10 +279,11 @@
         _busy = true;
         StateHasChanged();
 
+        string? probeText = null;
         try
         {
-            var probe = await Session.SubmitAnswerAsync(_session, answer, _runId);
-            if (probe is null)
+            probeText = await Session.SubmitAnswerAsync(_session, answer, _runId);
+            if (probeText is null)
             {
                 await Session.FinalizeAsync(_session, _runId);
                 await PersistSessionAsync();
@@ -234,15 +295,21 @@
             _currentAgentMessage = null;
             StateHasChanged();
         }
+
+        if (probeText is not null)
+        {
+            await SpeakLatestInterviewerTurnAsync();
+        }
     }
 
-    private void ResetSession()
+    private async Task ResetSession()
     {
         _subscriptionCts?.Cancel();
         _subscriptionCts = null;
         _session = null;
         _userInput = "";
         _currentAgentMessage = null;
+        await CancelSpeechAsync();
     }
 
     private void StartEventSubscription(RunId runId)
@@ -324,10 +391,14 @@
         _ => s.ToString()
     };
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _subscriptionCts?.Cancel();
         _subscriptionCts?.Dispose();
-        return ValueTask.CompletedTask;
+        await CancelSpeechAsync();
+        if (_ttsModule is not null)
+        {
+            try { await _ttsModule.DisposeAsync(); } catch { /* circuit closing */ }
+        }
     }
 }
