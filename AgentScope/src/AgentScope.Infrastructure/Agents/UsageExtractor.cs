@@ -24,6 +24,8 @@ public static class UsageExtractor
     private static readonly string[] CompletionTokenKeys =
         { "OutputTokenCount", "OutputTokens", "CompletionTokens", "CompletionTokenCount", "completion_tokens" };
 
+    private static readonly string[] ModelKeys = { "Model", "model", "ModelId", "model_id" };
+
     public static (int TokensIn, int TokensOut)? TryExtract(IReadOnlyDictionary<string, object?>? metadata)
     {
         if (metadata is null || metadata.Count == 0) return null;
@@ -60,18 +62,87 @@ public static class UsageExtractor
         return null;
     }
 
-    /// <summary>Convenience: extract and compose into <see cref="AgentUsage"/> with a computed cost.</summary>
+    /// <summary>
+    /// Convenience: extract and compose into <see cref="AgentUsage"/> with a computed cost.
+    /// Prefers the model name reported in the response metadata (OpenAI returns the exact
+    /// served model, e.g. <c>gpt-4o-2024-08-06</c>); falls back to <paramref name="fallbackModel"/>
+    /// when metadata doesn't include one. Important when per-role model overrides are in play,
+    /// since the agent's cached model may not match what the kernel actually called.
+    /// </summary>
     public static AgentUsage? TryExtractWithCost(
         IReadOnlyDictionary<string, object?>? metadata,
-        string model,
+        string fallbackModel,
         IUsageCalculator calculator)
     {
         var tokens = TryExtract(metadata);
         if (tokens is null) return null;
 
+        var model = TryExtractModel(metadata) ?? fallbackModel;
         var (tIn, tOut) = tokens.Value;
         var cost = calculator.EstimateCostUsd(model, tIn, tOut);
         return new AgentUsage(tIn, tOut, cost);
+    }
+
+    /// <summary>
+    /// Probes the metadata bag for a model identifier. Checks the top level first, then any
+    /// nested <c>Usage</c> container. Returns null when no model key is present.
+    /// </summary>
+    public static string? TryExtractModel(IReadOnlyDictionary<string, object?>? metadata)
+    {
+        if (metadata is null || metadata.Count == 0) return null;
+
+        if (TryReadStringFromDict(metadata, ModelKeys, out var top)) return top;
+
+        foreach (var key in UsageContainerKeys)
+        {
+            if (!metadata.TryGetValue(key, out var container) || container is null) continue;
+
+            if (container is IReadOnlyDictionary<string, object?> dict &&
+                TryReadStringFromDict(dict, ModelKeys, out var nested))
+            {
+                return nested;
+            }
+
+            if (TryReadStringFromObject(container, ModelKeys, out var nestedObj)) return nestedObj;
+        }
+
+        return null;
+    }
+
+    private static bool TryReadStringFromDict(IReadOnlyDictionary<string, object?> dict, string[] keys, out string value)
+    {
+        foreach (var key in keys)
+        {
+            if (dict.TryGetValue(key, out var raw) && raw is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                value = s;
+                return true;
+            }
+        }
+        value = string.Empty;
+        return false;
+    }
+
+    private static bool TryReadStringFromObject(object obj, string[] propertyNames, out string value)
+    {
+        var type = obj.GetType();
+        foreach (var name in propertyNames)
+        {
+            var prop = type.GetProperty(name);
+            if (prop is null) continue;
+
+            object? raw;
+            try { raw = prop.GetValue(obj); }
+            catch { continue; }
+
+            if (raw is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                value = s;
+                return true;
+            }
+        }
+        value = string.Empty;
+        return false;
     }
 
     private static bool TryReadFromDict(IReadOnlyDictionary<string, object?> dict, string[] keys, out int value)

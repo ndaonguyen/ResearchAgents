@@ -1,0 +1,233 @@
+@page "/past-runs"
+@rendermode InteractiveServer
+@using AgentScope.Web.Services
+@using System.Globalization
+@inject EvalResultsReader Reader
+
+<PageTitle>AgentScope — Past Runs</PageTitle>
+
+<div class="app">
+    <header>
+        <h1>Past eval runs</h1>
+        <span class="subtitle">From <code>@Reader.ResultsDirectory</code></span>
+    </header>
+
+    @if (_files.Count == 0)
+    {
+        <div class="empty">
+            <p>No eval result files found in <code>@Reader.ResultsDirectory</code>.</p>
+            <p>Run the eval CLI from the repo root to produce some:</p>
+            <pre>dotnet run --project tests/AgentScope.Evals -- --variant baseline --questions tests/AgentScope.Evals/questions/sample.json</pre>
+            <button class="refresh" @onclick="Refresh">Refresh</button>
+        </div>
+    }
+    else
+    {
+        <section class="file-list">
+            <div class="file-list-header">
+                <h2>Files</h2>
+                <button class="refresh" @onclick="Refresh">Refresh</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Variant</th>
+                        <th>When</th>
+                        <th>Rows</th>
+                        <th>OK / Err</th>
+                        <th>Mean score</th>
+                        <th>Agent cost</th>
+                        <th>Judge cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in _files)
+                    {
+                        <tr class="@(f.Name == _selected?.Name ? "selected" : "")" @onclick="() => Select(f)">
+                            <td><code>@f.Name</code></td>
+                            <td>@f.Variant</td>
+                            <td>@f.LastModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@f.Count</td>
+                            <td>
+                                <span class="ok">@f.OkCount</span>
+                                /
+                                <span class="err">@f.ErroredCount</span>
+                            </td>
+                            <td>@(f.MeanScore is { } m ? m.ToString("F2", CultureInfo.InvariantCulture) : "—")</td>
+                            <td>@FormatCost(f.TotalAgentCost)</td>
+                            <td>@FormatCost(f.TotalJudgeCost)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        @if (_selected is not null)
+        {
+            <section class="row-list">
+                <h2>@_selected.Variant <span class="muted">— @_selected.Name</span></h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Question</th>
+                            <th>Score</th>
+                            <th>Cost</th>
+                            <th>Duration</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _selected.Rows)
+                        {
+                            var isOpen = _expandedRunId == row.RunId;
+                            <tr class="@(row.Errored ? "row-err" : "")" @onclick="() => ToggleRow(row.RunId)">
+                                <td>
+                                    <div class="qid"><code>@row.QuestionId</code></div>
+                                    <div class="qtext">@Truncate(row.Question, 90)</div>
+                                </td>
+                                <td>@RenderScore(row.JudgeScore)</td>
+                                <td>@FormatCost(row.CostUsd)</td>
+                                <td>@row.DurationMs.ToString("N0") ms</td>
+                                <td>@(row.Errored ? "ERR" : "OK")</td>
+                            </tr>
+                            @if (isOpen)
+                            {
+                                <tr class="row-detail">
+                                    <td colspan="5">
+                                        <div class="detail-grid">
+                                            <div class="detail-block">
+                                                <div class="label">Run ID</div>
+                                                <code>@row.RunId</code>
+                                            </div>
+                                            <div class="detail-block">
+                                                <div class="label">Question</div>
+                                                <div>@row.Question</div>
+                                            </div>
+                                            @if (row.Errored)
+                                            {
+                                                <div class="detail-block">
+                                                    <div class="label">Error</div>
+                                                    <pre class="error">@row.ErrorMessage</pre>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="detail-block">
+                                                    <div class="label">Answer (@row.TokensIn.ToString("N0") in / @row.TokensOut.ToString("N0") out)</div>
+                                                    <pre class="answer">@row.Answer</pre>
+                                                </div>
+                                                @if (row.JudgeScore is not null || !string.IsNullOrEmpty(row.JudgeReasoning))
+                                                {
+                                                    <div class="detail-block">
+                                                        <div class="label">Judge — score @row.JudgeScore (@row.JudgeTokensIn.ToString("N0") in / @row.JudgeTokensOut.ToString("N0") out, @FormatCost(row.JudgeCostUsd))</div>
+                                                        <div class="reasoning">@row.JudgeReasoning</div>
+                                                    </div>
+                                                }
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+<style>
+    .app { max-width: 1200px; margin: 0 auto; padding: 24px; font-family: system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    h2 { font-size: 1.1rem; margin: 16px 0 8px; }
+    .subtitle { color: #666; font-size: 0.85rem; }
+    .muted { color: #94a3b8; font-weight: normal; font-size: 0.9rem; }
+    code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.85em; }
+    button.refresh { padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    button.refresh:hover { background: #f8fafc; }
+
+    .empty { padding: 40px; text-align: center; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1; color: #475569; }
+    .empty pre { background: #0f172a; color: #cbd5e1; padding: 10px 14px; border-radius: 6px; display: inline-block; text-align: left; font-size: 0.85rem; }
+
+    .file-list, .row-list { margin-bottom: 24px; }
+    .file-list-header { display: flex; align-items: center; justify-content: space-between; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; padding: 8px 10px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #475569; }
+    td { padding: 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: #f8fafc; }
+    tbody tr.selected { background: #eff6ff; }
+    tbody tr.row-err { background: #fef2f2; }
+    tbody tr.row-err:hover { background: #fee2e2; }
+    tbody tr.row-detail { background: #f8fafc; cursor: default; }
+    tbody tr.row-detail:hover { background: #f8fafc; }
+
+    .ok { color: #16a34a; font-weight: 600; }
+    .err { color: #dc2626; font-weight: 600; }
+
+    .qid { font-size: 0.85rem; }
+    .qtext { color: #64748b; font-size: 0.85rem; margin-top: 2px; }
+
+    .score-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: 0.85rem; }
+    .score-1, .score-2 { background: #fee2e2; color: #b91c1c; }
+    .score-3 { background: #fef3c7; color: #b45309; }
+    .score-4 { background: #d1fae5; color: #047857; }
+    .score-5 { background: #a7f3d0; color: #065f46; }
+    .score-na { color: #94a3b8; }
+
+    .detail-grid { display: grid; gap: 12px; padding: 8px 0; }
+    .detail-block .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; font-weight: 600; }
+    .detail-block pre.answer { background: white; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: inherit; font-size: 0.9rem; }
+    .detail-block pre.error { background: #fef2f2; color: #b91c1c; padding: 12px; border: 1px solid #fecaca; border-radius: 6px; white-space: pre-wrap; margin: 0; font-size: 0.85rem; }
+    .detail-block .reasoning { background: white; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-style: italic; color: #334155; }
+</style>
+
+@code {
+    private List<EvalResultFile> _files = new();
+    private EvalResultFile? _selected;
+    private string? _expandedRunId;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        _files = Reader.ReadAll().ToList();
+
+        // Re-resolve the selected file by name so a refresh after a new eval run picks up
+        // the updated row count.
+        _selected = _selected is null
+            ? _files.FirstOrDefault()
+            : _files.FirstOrDefault(f => f.Name == _selected.Name) ?? _files.FirstOrDefault();
+
+        _expandedRunId = null;
+    }
+
+    private void Select(EvalResultFile file)
+    {
+        _selected = file;
+        _expandedRunId = null;
+    }
+
+    private void ToggleRow(string runId)
+    {
+        _expandedRunId = _expandedRunId == runId ? null : runId;
+    }
+
+    private static string FormatCost(decimal? cost) =>
+        cost is { } c ? c.ToString("C4", CultureInfo.GetCultureInfo("en-US")) : "—";
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
+
+    private static MarkupString RenderScore(int? score)
+    {
+        if (score is null) return new MarkupString("<span class=\"score-na\">—</span>");
+        return new MarkupString($"<span class=\"score-badge score-{score}\">{score}</span>");
+    }
+}

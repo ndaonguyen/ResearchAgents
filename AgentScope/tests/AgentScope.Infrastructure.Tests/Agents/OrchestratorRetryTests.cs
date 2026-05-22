@@ -90,7 +90,7 @@ public class OrchestratorRetryTests
         });
 
         await Task.Delay(30);
-        await orchestrator.RunAsync(new AgentRunRequest(runId, "the question"));
+        await orchestrator.RunAsync(new AgentRunRequest(runId, "the question"), OrchestratorConfig.Default);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await Task.WhenAny(subscribe, Task.Delay(Timeout.Infinite, cts.Token));
@@ -123,7 +123,7 @@ public class OrchestratorRetryTests
             bus,
             NullLogger<Orchestrator>.Instance);
 
-        await orchestrator.RunAsync(new AgentRunRequest(runId, "q"));
+        await orchestrator.RunAsync(new AgentRunRequest(runId, "q"), OrchestratorConfig.Default);
 
         researcher.Calls.Should().HaveCount(2, "no retry when critique is ok");
     }
@@ -132,7 +132,7 @@ public class OrchestratorRetryTests
 
     private sealed class FakeKernelFactory : IKernelFactory
     {
-        public Kernel Create() => Kernel.CreateBuilder().Build();
+        public Kernel Create(string? modelOverride = null, bool includePlugins = true) => Kernel.CreateBuilder().Build();
     }
 
     private sealed class FakePlanner : IPlannerAgent

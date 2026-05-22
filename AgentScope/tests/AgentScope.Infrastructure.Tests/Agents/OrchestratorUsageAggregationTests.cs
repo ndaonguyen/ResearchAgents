@@ -40,7 +40,7 @@ public class OrchestratorUsageAggregationTests
         });
 
         await Task.Delay(30);
-        await orchestrator.RunAsync(new AgentRunRequest(runId, "the question"));
+        await orchestrator.RunAsync(new AgentRunRequest(runId, "the question"), OrchestratorConfig.Default);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await Task.WhenAny(subscribe, Task.Delay(Timeout.Infinite, cts.Token));
 
@@ -79,7 +79,7 @@ public class OrchestratorUsageAggregationTests
         });
 
         await Task.Delay(30);
-        await orchestrator.RunAsync(new AgentRunRequest(runId, "q"));
+        await orchestrator.RunAsync(new AgentRunRequest(runId, "q"), OrchestratorConfig.Default);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await Task.WhenAny(subscribe, Task.Delay(Timeout.Infinite, cts.Token));
 
@@ -96,7 +96,7 @@ public class OrchestratorUsageAggregationTests
 
     private sealed class FakeKernelFactory : IKernelFactory
     {
-        public Kernel Create() => Kernel.CreateBuilder().Build();
+        public Kernel Create(string? modelOverride = null, bool includePlugins = true) => Kernel.CreateBuilder().Build();
     }
 
     private sealed class FakePlanner : IPlannerAgent

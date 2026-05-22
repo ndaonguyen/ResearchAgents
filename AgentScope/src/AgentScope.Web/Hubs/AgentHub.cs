@@ -24,7 +24,7 @@ public sealed class AgentHub : Hub
         if (string.IsNullOrWhiteSpace(question))
             return;
 
-        var (runId, events) = _startRun.Start(question, Context.ConnectionAborted);
+        var (runId, events) = _startRun.Start(question, ct: Context.ConnectionAborted);
 
         try
         {

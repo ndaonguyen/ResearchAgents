@@ -38,39 +38,48 @@ public sealed class Orchestrator : IOrchestrator
         _logger = logger;
     }
 
-    public async Task RunAsync(AgentRunRequest request, CancellationToken ct = default)
+    public async Task RunAsync(AgentRunRequest request, OrchestratorConfig config, CancellationToken ct = default)
     {
         try
         {
-            var kernel = _kernelFactory.Create();
+            // One kernel per role so per-role model overrides take effect at the SK
+            // ChatCompletion service. The plugins (Tavily, BookLookup) are only meaningful
+            // for the researcher, but keeping them on every kernel keeps the code uniform
+            // and the cost is just plugin registration, not extra HTTP calls.
+            var plannerKernel     = _kernelFactory.Create(config.PlannerModel);
+            var researcherKernel  = _kernelFactory.Create(config.ResearcherModel);
+            var criticKernel      = _kernelFactory.Create(config.CriticModel);
+            var synthKernel       = _kernelFactory.Create(config.SynthesizerModel);
+
             var totalUsage = AgentUsage.Empty;
 
             // 1. PLAN
-            var (subQuestions, plannerUsage) = await _planner.PlanAsync(request.Question, kernel, request.RunId, ct);
+            var (subQuestions, plannerUsage) = await _planner.PlanAsync(request.Question, plannerKernel, request.RunId, ct);
             totalUsage = totalUsage.Add(plannerUsage);
 
             // 2. RESEARCH — parallel fanout
             var researchTasks = subQuestions
-                .Select((q, i) => _researcher.ResearchAsync(q, i + 1, kernel, request.RunId, ct: ct))
+                .Select((q, i) => _researcher.ResearchAsync(q, i + 1, researcherKernel, request.RunId, ct: ct))
                 .ToList();
             var researchResults = await Task.WhenAll(researchTasks);
             var research = researchResults.Select(r => r.Summary).ToArray();
             foreach (var r in researchResults) totalUsage = totalUsage.Add(r.Usage);
 
             // 3. CRITIQUE
-            var (critique, criticUsage) = await _critic.CritiqueAsync(request.Question, research, kernel, request.RunId, ct);
+            var (critique, criticUsage) = await _critic.CritiqueAsync(request.Question, research, criticKernel, request.RunId, ct);
             totalUsage = totalUsage.Add(criticUsage);
 
             // 3b. CRITIC-DRIVEN RETRY — one focused pass if the critic flagged a fixable gap.
             //     We don't re-run the critic afterwards (cap retries at 1) to keep latency bounded
             //     and avoid potential loops on stubborn questions.
+            //     Disabled when the eval harness wants to compare "no retry" as a variant.
             var augmentedResearch = research.ToList();
-            if (TryDeriveRetryQuestion(critique, out var focusedQuestion))
+            if (config.EnableCriticRetry && TryDeriveRetryQuestion(critique, out var focusedQuestion))
             {
                 var (retrySummary, retryUsage) = await _researcher.ResearchAsync(
                     focusedQuestion,
                     augmentedResearch.Count + 1,
-                    kernel,
+                    researcherKernel,
                     request.RunId,
                     searchMemoryFirst: true,
                     ct: ct);
@@ -80,7 +89,7 @@ public sealed class Orchestrator : IOrchestrator
 
             // 4. SYNTHESIZE — streams the final answer to the UI.
             var (finalAnswer, synthUsage) = await _synthesizer.SynthesizeAsync(
-                request.Question, augmentedResearch, critique, kernel, request.RunId, ct);
+                request.Question, augmentedResearch, critique, synthKernel, request.RunId, ct);
             totalUsage = totalUsage.Add(synthUsage);
 
             // 5. Terminate the run — system-level AgentFinishedEvent carries run-wide totals.

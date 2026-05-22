@@ -1,5 +1,17 @@
 @inherits LayoutComponentBase
 
+<nav class="topnav">
+    <NavLink href="/" Match="NavLinkMatch.All">Run</NavLink>
+    <NavLink href="/past-runs">Past runs</NavLink>
+</nav>
+
 <main>
     @Body
 </main>
+
+<style>
+    .topnav { display: flex; gap: 4px; padding: 8px 24px; background: #0f172a; }
+    .topnav ::deep a { color: #cbd5e1; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 0.9rem; font-weight: 500; }
+    .topnav ::deep a:hover { background: #1e293b; color: white; }
+    .topnav ::deep a.active { background: #2563eb; color: white; }
+</style>

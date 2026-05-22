@@ -1,0 +1,27 @@
+[
+  {
+    "id": "wasm-basics",
+    "question": "What is WebAssembly, and what are its main use cases beyond running C/C++ in the browser?",
+    "expectedShape": ["briefly defines WebAssembly", "lists at least two non-browser use cases"]
+  },
+  {
+    "id": "raft-vs-paxos",
+    "question": "Compare Raft and Paxos as consensus algorithms. What problem does Raft try to solve that Paxos doesn't?",
+    "expectedShape": ["names the design goal Raft prioritises (understandability)", "covers leader election or log replication"]
+  },
+  {
+    "id": "kafka-throughput",
+    "question": "How does Apache Kafka achieve high throughput? Mention at least three architectural decisions.",
+    "expectedShape": ["names at least three distinct architectural decisions"]
+  },
+  {
+    "id": "rust-borrow-checker",
+    "question": "Explain Rust's borrow checker to someone who knows C++ but not Rust. What does it prevent?",
+    "expectedShape": ["frames the explanation in C++ terms", "names specific bug classes it prevents"]
+  },
+  {
+    "id": "vector-databases",
+    "question": "What are the tradeoffs between using a dedicated vector database versus pgvector in PostgreSQL?",
+    "expectedShape": ["covers at least two tradeoff dimensions", "mentions a concrete dedicated vector DB"]
+  }
+]

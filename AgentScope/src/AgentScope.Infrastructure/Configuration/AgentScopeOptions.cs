@@ -13,6 +13,8 @@ public sealed class AgentScopeOptions
     public OpenAiOptions OpenAi { get; init; } = new();
     public TavilyOptions Tavily { get; init; } = new();
     public QdrantOptions Qdrant { get; init; } = new();
+    public JudgeOptions Judge { get; init; } = new();
+    public EvalsOptions Evals { get; init; } = new();
 }
 
 public sealed class OpenAiOptions
@@ -52,4 +54,25 @@ public sealed class QdrantOptions
 
     /// <summary>Collection name. Created lazily on first write.</summary>
     public string Collection { get; init; } = "agentscope-working-memory";
+}
+
+/// <summary>
+/// LLM-as-judge model used by the eval harness. Kept in its own section so the judge model
+/// is decoupled from the orchestrator's default model — typically you want a cheap judge
+/// (e.g. <c>gpt-4o-mini</c>) regardless of what the agents are running.
+/// API key is reused from <see cref="OpenAiOptions"/>.
+/// </summary>
+public sealed class JudgeOptions
+{
+    public string Model { get; init; } = "gpt-4o-mini";
+}
+
+/// <summary>
+/// Where the Web UI looks for eval-harness JSONL output. Default is <c>results</c>
+/// relative to the current working directory — which matches where the eval CLI writes
+/// when launched from the repo root.
+/// </summary>
+public sealed class EvalsOptions
+{
+    public string ResultsDirectory { get; init; } = "results";
 }

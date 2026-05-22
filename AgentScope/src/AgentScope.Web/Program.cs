@@ -2,6 +2,7 @@ using AgentScope.Application;
 using AgentScope.Infrastructure.DependencyInjection;
 using AgentScope.Web.Components;
 using AgentScope.Web.Hubs;
+using AgentScope.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,8 @@ builder.Services.AddSignalR();
 builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration);
+
+builder.Services.AddScoped<EvalResultsReader>();
 
 var app = builder.Build();
 

@@ -31,13 +31,15 @@ public sealed class StartRunUseCase
     /// <summary>
     /// Starts a run for <paramref name="question"/> and returns the event stream.
     /// The caller is responsible for consuming the stream until it completes
-    /// (or cancelling via <paramref name="ct"/>).
+    /// (or cancelling via <paramref name="ct"/>). When <paramref name="config"/> is null,
+    /// the orchestrator uses <see cref="OrchestratorConfig.Default"/>.
     /// </summary>
     public (RunId RunId, IAsyncEnumerable<AgentEvent> Events) Start(
-        string question, CancellationToken ct = default)
+        string question, OrchestratorConfig? config = null, CancellationToken ct = default)
     {
         var runId = RunId.New();
         var request = new AgentRunRequest(runId, question);
+        var effectiveConfig = config ?? OrchestratorConfig.Default;
 
         // Subscribe BEFORE starting the agent so we don't miss the first events.
         // The bus implementation must register the subscription synchronously.
@@ -47,7 +49,7 @@ public sealed class StartRunUseCase
         {
             try
             {
-                await _orchestrator.RunAsync(request, ct);
+                await _orchestrator.RunAsync(request, effectiveConfig, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

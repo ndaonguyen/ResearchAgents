@@ -12,5 +12,5 @@ namespace AgentScope.Application.Abstractions;
 /// </summary>
 public interface IOrchestrator
 {
-    Task RunAsync(AgentRunRequest request, CancellationToken ct = default);
+    Task RunAsync(AgentRunRequest request, OrchestratorConfig config, CancellationToken ct = default);
 }

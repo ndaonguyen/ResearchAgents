@@ -15,7 +15,17 @@ namespace AgentScope.Infrastructure.Agents;
 /// </summary>
 public interface IKernelFactory
 {
-    Kernel Create();
+    /// <summary>
+    /// Builds a kernel.
+    /// <para><paramref name="modelOverride"/>: when non-null, overrides
+    /// <c>AgentScopeOptions.OpenAi.Model</c>. Lets the orchestrator build a different
+    /// kernel per agent role for the eval harness.</para>
+    /// <para><paramref name="includePlugins"/>: when false, returns a minimal kernel with
+    /// only the chat completion service — no Tavily, no BookLookup, no function filter.
+    /// Used by the LLM-as-judge in the eval harness, which makes no function calls and
+    /// shouldn't pollute the event bus.</para>
+    /// </summary>
+    Kernel Create(string? modelOverride = null, bool includePlugins = true);
 }
 
 public sealed class KernelFactory : IKernelFactory
@@ -34,7 +44,7 @@ public sealed class KernelFactory : IKernelFactory
         _loggerFactory = loggerFactory;
     }
 
-    public Kernel Create()
+    public Kernel Create(string? modelOverride = null, bool includePlugins = true)
     {
         var builder = Kernel.CreateBuilder();
 
@@ -42,11 +52,13 @@ public sealed class KernelFactory : IKernelFactory
         var httpClient = new HttpClient(new OpenAiTrafficLogger(logPath, new HttpClientHandler()));
 
         builder.AddOpenAIChatCompletion(
-            modelId: _options.OpenAi.Model,
+            modelId: modelOverride ?? _options.OpenAi.Model,
             apiKey: _options.OpenAi.ApiKey,
             httpClient: httpClient);
 
         var kernel = builder.Build();
+
+        if (!includePlugins) return kernel;
 
         // Tavily — ITextSearch surfaced as a kernel function ("WebSearch.Search").
         var tavilySearch = new TavilyTextSearch(

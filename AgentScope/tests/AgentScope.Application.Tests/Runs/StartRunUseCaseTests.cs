@@ -26,7 +26,7 @@ public class StartRunUseCaseTests
         var useCase = new StartRunUseCase(fakeOrchestrator, bus, NullLogger<StartRunUseCase>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        var (runId, events) = useCase.Start("hello", cts.Token);
+        var (runId, events) = useCase.Start("hello", ct: cts.Token);
 
         var collected = new List<AgentEvent>();
         await foreach (var evt in events)
@@ -48,7 +48,7 @@ public class StartRunUseCaseTests
         var useCase = new StartRunUseCase(fakeOrchestrator, bus, NullLogger<StartRunUseCase>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        var (_, events) = useCase.Start("hello", cts.Token);
+        var (_, events) = useCase.Start("hello", ct: cts.Token);
 
         var collected = new List<AgentEvent>();
         await foreach (var evt in events)
@@ -68,7 +68,7 @@ public class StartRunUseCaseTests
             _behaviour = behaviour;
         }
 
-        public Task RunAsync(AgentRunRequest request, CancellationToken ct = default)
+        public Task RunAsync(AgentRunRequest request, OrchestratorConfig config, CancellationToken ct = default)
             => _behaviour(request, ct);
     }
 }
