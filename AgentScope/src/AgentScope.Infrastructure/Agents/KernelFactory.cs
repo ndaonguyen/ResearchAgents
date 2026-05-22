@@ -33,15 +33,18 @@ public sealed class KernelFactory : IKernelFactory
     private readonly AgentScopeOptions _options;
     private readonly EventPublishingFunctionFilter _filter;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ArchitectureSearchPlugin _architecturePlugin;
 
     public KernelFactory(
         IOptions<AgentScopeOptions> options,
         EventPublishingFunctionFilter filter,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        ArchitectureSearchPlugin architecturePlugin)
     {
         _options = options.Value;
         _filter = filter;
         _loggerFactory = loggerFactory;
+        _architecturePlugin = architecturePlugin;
     }
 
     public Kernel Create(string? modelOverride = null, bool includePlugins = true)
@@ -71,6 +74,13 @@ public sealed class KernelFactory : IKernelFactory
             new HttpClient { Timeout = TimeSpan.FromSeconds(15) },
             _loggerFactory.CreateLogger<BookLookupPlugin>());
         kernel.Plugins.AddFromObject(bookLookup, "BookLookup");
+
+        // Architecture-corpus RAG — only when populated and explicitly enabled.
+        // The indexer (tools/AgentScope.Indexer) must have run at least once.
+        if (_options.ArchitectureCorpus.Enabled)
+        {
+            kernel.Plugins.AddFromObject(_architecturePlugin, "ArchitectureCorpus");
+        }
 
         // Capture every function invocation onto the event bus.
         kernel.FunctionInvocationFilters.Add(_filter);

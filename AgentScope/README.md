@@ -32,7 +32,14 @@ New in week 3:
 - **Run-level aggregation** — the system-level terminal `AgentFinishedEvent` sums tokens and cost across every sub-agent invocation (including the critic-driven retry)
 - **UI surface**: per-agent token chip on each `agent.finished` row, total run cost shown in the header
 
-Coming in week 4: persistence, OpenTelemetry tracing, embeddings-token tracking.
+New since week 3:
+- **Per-role model overrides + retry toggle** (`OrchestratorConfig`) — the orchestrator builds one kernel per role so each agent can run on a different model. Used by the eval harness to compare variants.
+- **Eval harness** (`tests/AgentScope.Evals`) — console CLI that runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes JSONL results. Compare quality-vs-cost across orchestrator variants. See [docs/evals.md](docs/evals.md).
+- **Run persistence + Past Runs viewer** — every UI run is persisted to JSONL (`ui-{yyyyMMdd}.jsonl`); the eval CLI writes its own variant-stamped files. A new `/past-runs` page in the web app lists all of them with drill-in to answer, judge score, and reasoning. See [docs/persistence-and-past-runs.md](docs/persistence-and-past-runs.md).
+- **RAG over a curated architecture book corpus** — `tools/AgentScope.Indexer` extracts text from PDFs, chunks, embeds with `text-embedding-3-small`, and writes to a separate Qdrant collection. The researcher gets a new `SearchArchitectureCorpus` tool and is prompted to prefer it over web search for established concepts. See [docs/rag-architecture-corpus.md](docs/rag-architecture-corpus.md).
+- **Truthful per-model cost** — `UsageExtractor` now reads the model name from the OpenAI response metadata (e.g. `gpt-4o-2024-08-06`) and feeds *that* to the pricing calculator. Cached agent model is fallback only — important once per-role overrides are in play.
+
+Coming next: OpenTelemetry tracing, eval comparison view, embeddings-token tracking.
 
 ## Architecture
 
@@ -150,15 +157,19 @@ AgentScope/
 ├── Directory.Packages.props       # Central package versions
 ├── global.json                    # SDK pin
 ├── .editorconfig                  # C# style
+├── docs/                          # Feature guides (see links above)
 ├── src/
 │   ├── AgentScope.Domain/         # Entities, value objects, events (zero deps)
 │   ├── AgentScope.Application/    # Use cases, ports
-│   ├── AgentScope.Infrastructure/ # SK adapters, event bus impl
-│   └── AgentScope.Web/            # Blazor Server, SignalR hub, composition root
-└── tests/
-    ├── AgentScope.Domain.Tests/
-    ├── AgentScope.Application.Tests/
-    └── AgentScope.Infrastructure.Tests/
+│   ├── AgentScope.Infrastructure/ # SK adapters, event bus, plugins
+│   └── AgentScope.Web/            # Blazor Server, SignalR hub, Past Runs page
+├── tests/
+│   ├── AgentScope.Domain.Tests/
+│   ├── AgentScope.Application.Tests/
+│   ├── AgentScope.Infrastructure.Tests/
+│   └── AgentScope.Evals/          # Eval CLI (console app, not unit tests)
+└── tools/
+    └── AgentScope.Indexer/        # RAG corpus indexer (one-off console app)
 ```
 
 ## Why Clean Architecture for this
@@ -171,9 +182,11 @@ AgentScope/
 
 | Limitation | Fix in |
 |---|---|
-| Embeddings calls (`QdrantWorkingMemory`) aren't counted toward run cost | Week 4 |
-| No persistence — runs are in-memory only | Week 4 |
-| No OpenTelemetry tracing | Week 4 |
+| Embeddings calls (`QdrantWorkingMemory`, indexer, RAG queries) aren't counted toward run cost | Soon |
+| No OpenTelemetry tracing | Soon |
+| Past Runs page doesn't compare variants side-by-side | Soon |
+| Past Runs page doesn't auto-refresh while an eval is running | As needed |
+| Indexer always drops + rebuilds the architecture corpus (no incremental indexing) | As needed |
 | Tavily plugin uses default options (no domain filtering, default depth) | As needed |
 
 ## License

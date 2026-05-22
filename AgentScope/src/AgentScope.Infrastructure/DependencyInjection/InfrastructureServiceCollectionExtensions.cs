@@ -4,6 +4,7 @@ using AgentScope.Infrastructure.EventBus;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Agents.Filters;
 using AgentScope.Infrastructure.Memory;
+using AgentScope.Infrastructure.Plugins;
 using AgentScope.Infrastructure.Pricing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,11 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.AddSingleton<IWorkingMemory, NullWorkingMemory>();
         }
+
+        // Architecture-corpus RAG plugin. Registered as a concrete singleton so the kernel
+        // factory can pull it without going through an interface. Only used when
+        // ArchitectureCorpus.Enabled is true — the factory checks this before attaching it.
+        services.AddSingleton<ArchitectureSearchPlugin>();
 
         // Sub-agents — scoped per request.
         services.AddScoped<IPlannerAgent, PlannerAgent>();

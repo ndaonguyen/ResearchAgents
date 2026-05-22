@@ -15,6 +15,7 @@ public sealed class AgentScopeOptions
     public QdrantOptions Qdrant { get; init; } = new();
     public JudgeOptions Judge { get; init; } = new();
     public EvalsOptions Evals { get; init; } = new();
+    public ArchitectureCorpusOptions ArchitectureCorpus { get; init; } = new();
 }
 
 public sealed class OpenAiOptions
@@ -75,4 +76,30 @@ public sealed class JudgeOptions
 public sealed class EvalsOptions
 {
     public string ResultsDirectory { get; init; } = "results";
+}
+
+/// <summary>
+/// RAG corpus for software architecture content. Disabled by default — when
+/// <see cref="Enabled"/> is false, the <c>ArchitectureSearchPlugin</c> is NOT registered
+/// on the researcher's kernel, so behaviour is unchanged. Run the indexer (tools/AgentScope.Indexer)
+/// once to populate the Qdrant collection before flipping this on.
+///
+/// Qdrant config is shared with working memory (same host/port/key) but uses a separate
+/// collection so the corpus and per-run scratchpad don't bleed into each other.
+/// </summary>
+public sealed class ArchitectureCorpusOptions
+{
+    public bool Enabled { get; init; } = false;
+
+    public string Collection { get; init; } = "agentscope-arch-corpus";
+
+    /// <summary>Absolute path to the directory containing the book PDFs.</summary>
+    public string BooksDirectory { get; init; } = "";
+
+    /// <summary>
+    /// Filenames (relative to <see cref="BooksDirectory"/>) to index. Keeping this explicit
+    /// rather than globbing the whole directory makes the corpus deterministic and lets you
+    /// drop other PDFs into the same folder without polluting the index.
+    /// </summary>
+    public string[] Books { get; init; } = Array.Empty<string>();
 }

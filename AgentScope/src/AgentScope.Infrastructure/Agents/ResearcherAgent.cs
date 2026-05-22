@@ -24,10 +24,19 @@ public sealed class ResearcherAgent : IResearcherAgent
 
         Rules:
         - Stay focused on the given sub-question. Do not drift to related topics.
-        - Use WebSearch when you need fresh or specific facts.
-        - Cite sources by URL inline, e.g. "WebAssembly runs in a sandbox (https://...)".
+        - Tool preference:
+          * SearchArchitectureCorpus FIRST for any established software-architecture concept
+            (patterns, trade-offs, DDD terminology, microservices, evolutionary architecture).
+            The corpus has authoritative book content that web snippets can't match.
+          * WebSearch for recent developments, specific products, news, or anything outside
+            software architecture.
+          * BookLookup when the question mentions a specific book by name.
+        - Citations:
+          * For corpus chunks, cite the book and page range inline, e.g.
+            "(Software Architecture - The Hard Parts, pp. 47-49)".
+          * For web sources, cite the URL inline, e.g. "(https://...)".
         - 3-6 sentences of prose. No headings, no bullet lists. Be dense.
-        - If WebSearch returns nothing useful, say so explicitly — do not invent facts.
+        - If neither tool returns anything useful, say so explicitly — do not invent facts.
         """;
 
     private readonly IAgentEventBus _bus;
