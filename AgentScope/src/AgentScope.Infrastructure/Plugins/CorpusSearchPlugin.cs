@@ -5,53 +5,50 @@ using System.Text;
 using System.Text.Json.Serialization;
 using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Microsoft.SemanticKernel;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 
 namespace AgentScope.Infrastructure.Plugins;
 
 /// <summary>
-/// SK plugin: searches the curated software-architecture book corpus indexed by
-/// <c>tools/AgentScope.Indexer</c>. Embeds the query, runs a top-k Qdrant search,
-/// and returns formatted chunks with book + page citations.
+/// Generic RAG search plugin parameterised by a <see cref="CorpusOptions"/>. One instance
+/// per enabled corpus is created in <c>KernelFactory</c> and registered with a per-corpus
+/// description (set via <see cref="Microsoft.SemanticKernel.KernelFunctionFactory"/>), so the
+/// researcher LLM sees each corpus as a distinct tool with its own selection signal.
 ///
-/// Registered on the researcher's kernel only when
-/// <see cref="ArchitectureCorpusOptions.Enabled"/> is true.
-///
-/// Self-contained (own Qdrant client + embedding HTTP) so it has no coupling to the
-/// per-run working memory infrastructure — the corpus collection and the working-memory
-/// collection are different concerns and should stay independent.
+/// Self-contained (own Qdrant client + embedding HTTP). No class-level
+/// <c>[KernelFunction]</c> attribute — the function is registered explicitly by the factory
+/// so the description can come from config rather than a compile-time string.
 /// </summary>
-public sealed class ArchitectureSearchPlugin : IDisposable
+public sealed class CorpusSearchPlugin : IDisposable
 {
     private const int DefaultTopK = 5;
     private const int MaxTopK = 10;
 
+    private readonly CorpusOptions _corpus;
+    private readonly OpenAiOptions _openAiOptions;
     private readonly QdrantClient _qdrant;
     private readonly HttpClient _embeddingsHttp;
-    private readonly ArchitectureCorpusOptions _corpusOptions;
-    private readonly OpenAiOptions _openAiOptions;
-    private readonly ILogger<ArchitectureSearchPlugin> _logger;
+    private readonly ILogger<CorpusSearchPlugin> _logger;
 
-    public ArchitectureSearchPlugin(
-        IOptions<AgentScopeOptions> options,
+    public CorpusSearchPlugin(
+        CorpusOptions corpus,
+        QdrantOptions qdrant,
+        OpenAiOptions openAi,
         IHttpClientFactory httpClientFactory,
-        ILogger<ArchitectureSearchPlugin> logger)
+        ILogger<CorpusSearchPlugin> logger)
     {
-        var o = options.Value;
-        _corpusOptions = o.ArchitectureCorpus;
-        _openAiOptions = o.OpenAi;
+        _corpus = corpus;
+        _openAiOptions = openAi;
         _logger = logger;
 
         _qdrant = new QdrantClient(
-            host: o.Qdrant.Host,
-            port: o.Qdrant.Port,
-            https: o.Qdrant.UseHttps,
-            apiKey: o.Qdrant.ApiKey);
+            host: qdrant.Host,
+            port: qdrant.Port,
+            https: qdrant.UseHttps,
+            apiKey: qdrant.ApiKey);
 
-        _embeddingsHttp = httpClientFactory.CreateClient(nameof(ArchitectureSearchPlugin));
+        _embeddingsHttp = httpClientFactory.CreateClient($"corpus-{corpus.Name}");
         _embeddingsHttp.BaseAddress ??= new Uri("https://api.openai.com/v1/");
         if (_embeddingsHttp.DefaultRequestHeaders.Authorization is null)
         {
@@ -60,14 +57,6 @@ public sealed class ArchitectureSearchPlugin : IDisposable
         }
     }
 
-    [KernelFunction("SearchArchitectureCorpus")]
-    [Description("Search a curated corpus of software architecture books " +
-                 "(Software Architecture - The Hard Parts, Microservices Patterns, DDD Distilled, " +
-                 "Software Architecture Patterns, Building Evolutionary Architectures) for established " +
-                 "concepts, patterns, trade-offs, and definitions. Prefer this over WebSearch for any " +
-                 "established architectural concept — pattern definitions, decision frameworks, DDD " +
-                 "terminology, microservices trade-offs. Use WebSearch only when you need recent " +
-                 "developments, specific products, or news.")]
     public async Task<string> SearchAsync(
         [Description("The search query — phrase it as a natural-language question or topic, not keywords.")] string query,
         [Description("Number of chunks to retrieve. Default 5, max 10.")] int topK = DefaultTopK,
@@ -83,28 +72,28 @@ public sealed class ArchitectureSearchPlugin : IDisposable
             var vector = await EmbedAsync(query, ct);
 
             var results = await _qdrant.SearchAsync(
-                collectionName: _corpusOptions.Collection,
+                collectionName: _corpus.Collection,
                 vector: vector,
                 limit: (ulong)topK,
                 payloadSelector: true,
                 cancellationToken: ct);
 
             if (results.Count == 0)
-                return "No matches in the architecture corpus.";
+                return $"No matches in the {_corpus.Name} corpus.";
 
             return FormatResults(results);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "ArchitectureSearch failed for query: {Query}", query);
-            return $"ArchitectureSearch failed: {ex.Message}";
+            _logger.LogWarning(ex, "Corpus search failed for {Corpus}: {Query}", _corpus.Name, query);
+            return $"{_corpus.PluginName} search failed: {ex.Message}";
         }
     }
 
     private static string FormatResults(IReadOnlyList<ScoredPoint> results)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Found {results.Count} chunks in the architecture corpus:");
+        sb.AppendLine($"Found {results.Count} chunks:");
         sb.AppendLine();
 
         for (var i = 0; i < results.Count; i++)

@@ -24,19 +24,24 @@ public sealed class ResearcherAgent : IResearcherAgent
 
         Rules:
         - Stay focused on the given sub-question. Do not drift to related topics.
-        - Tool preference:
-          * SearchArchitectureCorpus FIRST for any established software-architecture concept
-            (patterns, trade-offs, DDD terminology, microservices, evolutionary architecture).
-            The corpus has authoritative book content that web snippets can't match.
-          * WebSearch for recent developments, specific products, news, or anything outside
-            software architecture.
-          * BookLookup when the question mentions a specific book by name.
+        - Tool preference (pick the most specific corpus that fits, fall back to WebSearch):
+          * ArchitectureCorpus.Search — established software-architecture concepts
+            (patterns, trade-offs, DDD terminology, microservices design, evolutionary architecture,
+            event-driven patterns, monolith-to-microservices migration).
+          * SystemDesignCorpus.Search — scalable system-design questions (sharding, replication,
+            queueing, caching, load balancing, capacity estimation, worked system-design examples
+            like URL shorteners, chat systems, news feeds).
+          * WebSearch.Search — recent developments, specific products, news, or anything not
+            covered by the corpora above.
+          * BookLookup.GetBookMetadata — when the question mentions a specific book by name and
+            you need its table of contents or summary.
+        - You may call multiple tools if a sub-question genuinely spans multiple corpora.
         - Citations:
-          * For corpus chunks, cite the book and page range inline, e.g.
-            "(Software Architecture - The Hard Parts, pp. 47-49)".
-          * For web sources, cite the URL inline, e.g. "(https://...)".
+          * Corpus chunks: cite the book and page range inline, e.g.
+            "(Software Architecture - The Hard Parts, pp. 47-49)" or "(System Design - ByteByteGo, p. 112)".
+          * Web sources: cite the URL inline, e.g. "(https://...)".
         - 3-6 sentences of prose. No headings, no bullet lists. Be dense.
-        - If neither tool returns anything useful, say so explicitly — do not invent facts.
+        - If no tool returns anything useful, say so explicitly — do not invent facts.
         """;
 
     private readonly IAgentEventBus _bus;

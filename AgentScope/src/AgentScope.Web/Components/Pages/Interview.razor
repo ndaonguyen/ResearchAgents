@@ -1,0 +1,333 @@
+@page "/interview"
+@rendermode InteractiveServer
+@using AgentScope.Application.Abstractions
+@using AgentScope.Application.Interview
+@using AgentScope.Domain.Agents
+@using AgentScope.Domain.Events
+@using AgentScope.Domain.Interview
+@using AgentScope.Domain.Runs
+@using AgentScope.Web.Services
+@inject InterviewSessionUseCase Session
+@inject IAgentEventBus Bus
+@inject RunPersister Persister
+@implements IAsyncDisposable
+
+<PageTitle>ResearchAgent — Interview practice</PageTitle>
+
+<div class="app">
+    <header>
+        <h1>Interview practice</h1>
+        <span class="subtitle">System design — grounded in your indexed book corpus</span>
+    </header>
+
+    @if (_session is null)
+    {
+        <section class="topic-picker">
+            <label>Topic:</label>
+            <select @bind="_selectedTopicId" disabled="@_busy">
+                <optgroup label="Concepts">
+                    @foreach (var t in _topics.Where(x => x.Group == TopicGroup.Concept))
+                    {
+                        <option value="@t.Id">@t.DisplayName</option>
+                    }
+                </optgroup>
+                <optgroup label="Design exercises">
+                    @foreach (var t in _topics.Where(x => x.Group == TopicGroup.Exercise))
+                    {
+                        <option value="@t.Id">@t.DisplayName</option>
+                    }
+                </optgroup>
+            </select>
+            <button class="primary" @onclick="StartSession" disabled="@_busy">
+                @(_busy ? "Starting…" : "Start interview")
+            </button>
+        </section>
+    }
+    else
+    {
+        <section class="transcript">
+            @foreach (var turn in _session.Transcript)
+            {
+                <div class="turn turn-@turn.Speaker.ToString().ToLowerInvariant()">
+                    <div class="speaker">@LabelFor(turn.Speaker)</div>
+                    <div class="text">@turn.Text</div>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_currentAgentMessage))
+            {
+                <div class="turn turn-streaming">
+                    <div class="speaker">@_currentAgentLabel (typing…)</div>
+                    <div class="text">@_currentAgentMessage</div>
+                </div>
+            }
+        </section>
+
+        @if (_session.FinalGrade is null)
+        {
+            <section class="answer-input">
+                <textarea @bind="_userInput" @bind:event="oninput"
+                          placeholder="Type your answer here. Be specific — talk through trade-offs, scale, edge cases."
+                          disabled="@_busy" rows="8"></textarea>
+                <button class="primary" @onclick="SubmitAnswer"
+                        disabled="@(_busy || string.IsNullOrWhiteSpace(_userInput))">
+                    @(_busy ? "Working…" : "Submit answer")
+                </button>
+            </section>
+        }
+        else
+        {
+            <section class="grade-card">
+                <div class="score-row">
+                    <h2>Grade</h2>
+                    <div class="score-badge score-@_session.FinalGrade.Score">@_session.FinalGrade.Score / 5</div>
+                </div>
+
+                @if (_session.FinalGrade.Strengths.Any())
+                {
+                    <h3>Strengths</h3>
+                    <ul class="strengths">
+                        @foreach (var s in _session.FinalGrade.Strengths)
+                        {
+                            <li>@s</li>
+                        }
+                    </ul>
+                }
+
+                @if (_session.FinalGrade.Gaps.Any())
+                {
+                    <h3>Gaps</h3>
+                    <ul class="gaps">
+                        @foreach (var g in _session.FinalGrade.Gaps)
+                        {
+                            <li>@g</li>
+                        }
+                    </ul>
+                }
+
+                @if (_session.FinalCoaching is not null)
+                {
+                    <h3>Coach</h3>
+                    <p class="coach-summary">@_session.FinalCoaching.Summary</p>
+
+                    @if (_session.FinalCoaching.SuggestedReading.Any())
+                    {
+                        <h4>Suggested reading</h4>
+                        <ul class="reading">
+                            @foreach (var r in _session.FinalCoaching.SuggestedReading)
+                            {
+                                <li>@r</li>
+                            }
+                        </ul>
+                    }
+                }
+
+                <button @onclick="ResetSession">Start a new interview</button>
+            </section>
+        }
+    }
+</div>
+
+<style>
+    .app { max-width: 900px; margin: 0 auto; padding: 24px; font-family: system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .subtitle { color: #666; font-size: 0.9rem; }
+
+    .topic-picker { display: flex; align-items: center; gap: 12px; padding: 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .topic-picker select { padding: 8px 12px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 280px; }
+    button.primary { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; font-size: 1rem; }
+    button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    .transcript { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+    .turn { padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .turn .speaker { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin-bottom: 6px; }
+    .turn .text { white-space: pre-wrap; word-wrap: break-word; }
+    .turn-interviewer { background: #eff6ff; border-color: #bfdbfe; }
+    .turn-interviewer .speaker { color: #1e40af; }
+    .turn-probe { background: #fef3c7; border-color: #fde68a; }
+    .turn-probe .speaker { color: #92400e; }
+    .turn-user { background: #f0fdf4; border-color: #bbf7d0; }
+    .turn-user .speaker { color: #15803d; }
+    .turn-streaming { background: #f8fafc; border-color: #e2e8f0; opacity: 0.85; }
+    .turn-streaming .speaker { color: #475569; }
+
+    .answer-input { display: flex; flex-direction: column; gap: 12px; }
+    .answer-input textarea { padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit; font-size: 0.95rem; resize: vertical; }
+    .answer-input button { align-self: flex-end; }
+
+    .grade-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; }
+    .grade-card h2, .grade-card h3, .grade-card h4 { margin-top: 0; }
+    .grade-card h3 { margin-top: 18px; font-size: 1rem; color: #475569; }
+    .grade-card h4 { margin-top: 14px; font-size: 0.9rem; color: #64748b; }
+    .grade-card .score-row { display: flex; align-items: center; justify-content: space-between; }
+    .score-badge { display: inline-block; padding: 6px 16px; border-radius: 999px; font-weight: 700; font-size: 1.2rem; }
+    .score-1, .score-2 { background: #fee2e2; color: #b91c1c; }
+    .score-3 { background: #fef3c7; color: #b45309; }
+    .score-4 { background: #d1fae5; color: #047857; }
+    .score-5 { background: #a7f3d0; color: #065f46; }
+    .grade-card .strengths li { color: #15803d; }
+    .grade-card .gaps li { color: #b91c1c; }
+    .grade-card .coach-summary { font-style: italic; color: #334155; line-height: 1.6; }
+    .grade-card .reading li { color: #475569; }
+    .grade-card button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; }
+    .grade-card button:hover { background: #f1f5f9; }
+</style>
+
+@code {
+    private readonly IReadOnlyList<InterviewTopic> _topics = InterviewTopics.All;
+    private string _selectedTopicId = "caching";
+
+    private InterviewSession? _session;
+    private RunId _runId;
+    private string _userInput = "";
+    private bool _busy;
+
+    private string? _currentAgentMessage;
+    private string _currentAgentLabel = "";
+
+    private CancellationTokenSource? _subscriptionCts;
+
+    private async Task StartSession()
+    {
+        var topic = InterviewTopics.FindById(_selectedTopicId);
+        if (topic is null) return;
+
+        _busy = true;
+        _runId = RunId.New();
+        StartEventSubscription(_runId);
+        StateHasChanged();
+
+        try
+        {
+            _session = await Session.StartAsync(topic, _runId);
+        }
+        finally
+        {
+            _busy = false;
+            _currentAgentMessage = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitAnswer()
+    {
+        if (_session is null || string.IsNullOrWhiteSpace(_userInput)) return;
+
+        var answer = _userInput;
+        _userInput = "";
+        _busy = true;
+        StateHasChanged();
+
+        try
+        {
+            var probe = await Session.SubmitAnswerAsync(_session, answer, _runId);
+            if (probe is null)
+            {
+                await Session.FinalizeAsync(_session, _runId);
+                await PersistSessionAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+            _currentAgentMessage = null;
+            StateHasChanged();
+        }
+    }
+
+    private void ResetSession()
+    {
+        _subscriptionCts?.Cancel();
+        _subscriptionCts = null;
+        _session = null;
+        _userInput = "";
+        _currentAgentMessage = null;
+    }
+
+    private void StartEventSubscription(RunId runId)
+    {
+        _subscriptionCts?.Cancel();
+        _subscriptionCts = new CancellationTokenSource();
+        var ct = _subscriptionCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var evt in Bus.SubscribeAsync(runId, ct))
+                {
+                    await ProcessEventAsync(evt);
+                }
+            }
+            catch (OperationCanceledException) { /* expected on dispose */ }
+        }, ct);
+    }
+
+    private async Task ProcessEventAsync(AgentEvent evt)
+    {
+        switch (evt)
+        {
+            case AgentStartedEvent started:
+                _currentAgentMessage = "";
+                _currentAgentLabel = started.AgentName;
+                break;
+            case AgentTokenEvent tok:
+                _currentAgentMessage = (_currentAgentMessage ?? "") + tok.Delta;
+                break;
+            case AgentFinishedEvent finished when finished.AgentId != AgentId.System:
+                // Sub-agent done — clear the streaming bubble (the finalized text appears via the transcript).
+                _currentAgentMessage = null;
+                break;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PersistSessionAsync()
+    {
+        if (_session?.FinalGrade is null) return;
+
+        var transcript = string.Join("\n\n",
+            _session.Transcript.Select(t => $"[{t.Speaker}] {t.Text}"));
+
+        var coaching = _session.FinalCoaching is { } c
+            ? c.Summary + (c.SuggestedReading.Count > 0 ? "\n\nSuggested reading:\n  - " + string.Join("\n  - ", c.SuggestedReading) : "")
+            : null;
+
+        var row = new EvalRow(
+            QuestionId: _session.SessionId,
+            Variant: "interview",
+            Question: $"[{_session.Topic.DisplayName}] {_session.Transcript.FirstOrDefault()?.Text ?? ""}",
+            RunId: _runId.Value,
+            Answer: transcript,
+            TokensIn: 0,
+            TokensOut: 0,
+            CostUsd: null,
+            DurationMs: (long)(DateTime.UtcNow - _session.StartedAtUtc).TotalMilliseconds,
+            Errored: false,
+            ErrorMessage: null,
+            JudgeScore: _session.FinalGrade.Score,
+            JudgeReasoning: coaching,
+            JudgeTokensIn: 0,
+            JudgeTokensOut: 0,
+            JudgeCostUsd: null,
+            CompletedAt: DateTime.UtcNow);
+
+        await Persister.PersistAsync(row);
+    }
+
+    private static string LabelFor(Speaker s) => s switch
+    {
+        Speaker.Interviewer => "Interviewer",
+        Speaker.Probe => "Interviewer (follow-up)",
+        Speaker.User => "You",
+        _ => s.ToString()
+    };
+
+    public ValueTask DisposeAsync()
+    {
+        _subscriptionCts?.Cancel();
+        _subscriptionCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

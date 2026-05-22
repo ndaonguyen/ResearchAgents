@@ -1,6 +1,7 @@
 using AgentScope.Infrastructure.Configuration;
 using AgentScope.Infrastructure.Agents.Filters;
 using AgentScope.Infrastructure.Plugins;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
@@ -33,18 +34,18 @@ public sealed class KernelFactory : IKernelFactory
     private readonly AgentScopeOptions _options;
     private readonly EventPublishingFunctionFilter _filter;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly ArchitectureSearchPlugin _architecturePlugin;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public KernelFactory(
         IOptions<AgentScopeOptions> options,
         EventPublishingFunctionFilter filter,
         ILoggerFactory loggerFactory,
-        ArchitectureSearchPlugin architecturePlugin)
+        IHttpClientFactory httpClientFactory)
     {
         _options = options.Value;
         _filter = filter;
         _loggerFactory = loggerFactory;
-        _architecturePlugin = architecturePlugin;
+        _httpClientFactory = httpClientFactory;
     }
 
     public Kernel Create(string? modelOverride = null, bool includePlugins = true)
@@ -75,11 +76,29 @@ public sealed class KernelFactory : IKernelFactory
             _loggerFactory.CreateLogger<BookLookupPlugin>());
         kernel.Plugins.AddFromObject(bookLookup, "BookLookup");
 
-        // Architecture-corpus RAG — only when populated and explicitly enabled.
-        // The indexer (tools/AgentScope.Indexer) must have run at least once.
-        if (_options.ArchitectureCorpus.Enabled)
+        // RAG corpora — one plugin per enabled CorpusOptions entry. Each gets its own
+        // KernelFunction with the description from config, so the LLM sees each corpus
+        // as a distinct tool with its own selection signal. Skip silently when none
+        // are enabled (zero-config default = no RAG, behaviour unchanged).
+        foreach (var corpus in _options.Corpora)
         {
-            kernel.Plugins.AddFromObject(_architecturePlugin, "ArchitectureCorpus");
+            if (!corpus.Enabled) continue;
+            if (string.IsNullOrWhiteSpace(corpus.PluginName) || string.IsNullOrWhiteSpace(corpus.Collection))
+                continue;
+
+            var plugin = new CorpusSearchPlugin(
+                corpus,
+                _options.Qdrant,
+                _options.OpenAi,
+                _httpClientFactory,
+                _loggerFactory.CreateLogger<CorpusSearchPlugin>());
+
+            var function = KernelFunctionFactory.CreateFromMethod(
+                method: plugin.SearchAsync,
+                functionName: "Search",
+                description: corpus.Description);
+
+            kernel.Plugins.AddFromFunctions(corpus.PluginName, new[] { function });
         }
 
         // Capture every function invocation onto the event bus.

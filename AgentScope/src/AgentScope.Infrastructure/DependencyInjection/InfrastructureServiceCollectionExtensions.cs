@@ -4,7 +4,6 @@ using AgentScope.Infrastructure.EventBus;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Agents.Filters;
 using AgentScope.Infrastructure.Memory;
-using AgentScope.Infrastructure.Plugins;
 using AgentScope.Infrastructure.Pricing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,16 +56,20 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddSingleton<IWorkingMemory, NullWorkingMemory>();
         }
 
-        // Architecture-corpus RAG plugin. Registered as a concrete singleton so the kernel
-        // factory can pull it without going through an interface. Only used when
-        // ArchitectureCorpus.Enabled is true — the factory checks this before attaching it.
-        services.AddSingleton<ArchitectureSearchPlugin>();
+        // RAG corpus plugins are constructed per-corpus inside KernelFactory (one instance
+        // per enabled CorpusOptions entry), so no DI registration here.
 
-        // Sub-agents — scoped per request.
+        // Research sub-agents — scoped per request.
         services.AddScoped<IPlannerAgent, PlannerAgent>();
         services.AddScoped<IResearcherAgent, ResearcherAgent>();
         services.AddScoped<ICriticAgent, CriticAgent>();
         services.AddScoped<ISynthesizerAgent, SynthesizerAgent>();
+
+        // Interview sub-agents — same lifetime as research agents.
+        services.AddScoped<IInterviewerAgent, InterviewerAgent>();
+        services.AddScoped<IProbeAgent, ProbeAgent>();
+        services.AddScoped<IGraderAgent, GraderAgent>();
+        services.AddScoped<ICoachAgent, CoachAgent>();
 
         // Orchestrator — scoped so each request gets its own logger scope.
         services.AddScoped<IOrchestrator, Orchestrator>();

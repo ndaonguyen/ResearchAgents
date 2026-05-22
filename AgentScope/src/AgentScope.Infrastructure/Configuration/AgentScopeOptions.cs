@@ -15,7 +15,14 @@ public sealed class AgentScopeOptions
     public QdrantOptions Qdrant { get; init; } = new();
     public JudgeOptions Judge { get; init; } = new();
     public EvalsOptions Evals { get; init; } = new();
-    public ArchitectureCorpusOptions ArchitectureCorpus { get; init; } = new();
+
+    /// <summary>
+    /// RAG corpora exposed to the researcher as separate kernel plugins. Each corpus
+    /// gets its own Qdrant collection and shows up to the LLM as a distinct tool with
+    /// its own description, so the researcher can pick the right corpus per sub-question.
+    /// Empty by default; populate via appsettings/user-secrets.
+    /// </summary>
+    public CorpusOptions[] Corpora { get; init; } = Array.Empty<CorpusOptions>();
 }
 
 public sealed class OpenAiOptions
@@ -79,27 +86,39 @@ public sealed class EvalsOptions
 }
 
 /// <summary>
-/// RAG corpus for software architecture content. Disabled by default — when
-/// <see cref="Enabled"/> is false, the <c>ArchitectureSearchPlugin</c> is NOT registered
-/// on the researcher's kernel, so behaviour is unchanged. Run the indexer (tools/AgentScope.Indexer)
-/// once to populate the Qdrant collection before flipping this on.
+/// One RAG corpus. The indexer reads <see cref="BooksDirectory"/> + <see cref="Books"/>
+/// and writes to <see cref="Collection"/>. The web app registers a kernel plugin named
+/// <see cref="PluginName"/> with <see cref="Description"/> as the function description
+/// the LLM sees — that's the signal the researcher uses to pick this corpus over others.
 ///
-/// Qdrant config is shared with working memory (same host/port/key) but uses a separate
-/// collection so the corpus and per-run scratchpad don't bleed into each other.
+/// Qdrant connection (host/port/key) is shared with working memory but each corpus
+/// lives in its own collection.
 /// </summary>
-public sealed class ArchitectureCorpusOptions
+public sealed class CorpusOptions
 {
+    /// <summary>Internal identifier, used only in logs (e.g. "architecture", "system-design").</summary>
+    public string Name { get; init; } = "";
+
     public bool Enabled { get; init; } = false;
 
-    public string Collection { get; init; } = "agentscope-arch-corpus";
+    public string Collection { get; init; } = "";
 
     /// <summary>Absolute path to the directory containing the book PDFs.</summary>
     public string BooksDirectory { get; init; } = "";
 
-    /// <summary>
-    /// Filenames (relative to <see cref="BooksDirectory"/>) to index. Keeping this explicit
-    /// rather than globbing the whole directory makes the corpus deterministic and lets you
-    /// drop other PDFs into the same folder without polluting the index.
-    /// </summary>
+    /// <summary>Filenames (relative to <see cref="BooksDirectory"/>) to index.</summary>
     public string[] Books { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Kernel plugin name surfaced to the LLM (e.g. "ArchitectureCorpus", "SystemDesignCorpus").
+    /// The researcher sees this as the prefix on the tool name: <c>{PluginName}.Search</c>.
+    /// </summary>
+    public string PluginName { get; init; } = "";
+
+    /// <summary>
+    /// Description the LLM sees for this corpus's Search function. This is the dominant
+    /// signal in tool selection — be specific about WHEN to prefer this corpus and what
+    /// it covers. List the actual book titles if useful.
+    /// </summary>
+    public string Description { get; init; } = "";
 }

@@ -11,6 +11,12 @@ public readonly record struct AgentId(string Value)
     public static AgentId Critic { get; } = new("critic");
     public static AgentId Synthesizer { get; } = new("synthesizer");
 
+    // Interview-mode agents.
+    public static AgentId Interviewer { get; } = new("interviewer");
+    public static AgentId Probe { get; } = new("probe");
+    public static AgentId Grader { get; } = new("grader");
+    public static AgentId Coach { get; } = new("coach");
+
     public static AgentId Researcher(int index) => new($"researcher-{index}");
 
     public override string ToString() => Value;

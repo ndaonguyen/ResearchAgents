@@ -18,13 +18,14 @@ using UglyToad.PdfPig;
 // Usage:
 //   dotnet run --project tools/AgentScope.Indexer
 //
-// Reads AgentScope:ArchitectureCorpus from config:
+// Reads AgentScope:Corpora[] from config. Each entry has:
+//   - Name, Collection: Qdrant collection name
 //   - BooksDirectory: folder containing the PDFs
 //   - Books[]: filenames to index
-//   - Collection: Qdrant collection name (default agentscope-arch-corpus)
+//   - Enabled: skip the corpus when false
 //
-// Drops and recreates the collection on every run so the index is deterministic.
-// The total embedding cost for ~5 typical books is well under $0.05.
+// Drops and recreates each enabled corpus's collection on every run, so the index
+// is deterministic. Embedding cost is well under $0.05 per ~5 typical books.
 
 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 {
@@ -52,119 +53,124 @@ if (string.IsNullOrWhiteSpace(options.OpenAi.ApiKey) || options.OpenAi.ApiKey ==
     return 1;
 }
 
-if (string.IsNullOrWhiteSpace(options.ArchitectureCorpus.BooksDirectory))
+var enabledCorpora = options.Corpora.Where(c => c.Enabled).ToList();
+if (enabledCorpora.Count == 0)
 {
-    Console.Error.WriteLine("ERROR: AgentScope:ArchitectureCorpus:BooksDirectory is not set.");
+    Console.Error.WriteLine("ERROR: No enabled corpora in AgentScope:Corpora[].");
     return 1;
 }
 
-if (options.ArchitectureCorpus.Books.Length == 0)
-{
-    Console.Error.WriteLine("ERROR: AgentScope:ArchitectureCorpus:Books is empty.");
-    return 1;
-}
-
-var booksDir = options.ArchitectureCorpus.BooksDirectory;
-if (!Directory.Exists(booksDir))
-{
-    Console.Error.WriteLine($"ERROR: Books directory not found: {booksDir}");
-    return 1;
-}
-
-logger.LogInformation("Indexing {Count} book(s) from {Dir} into Qdrant collection {Collection}",
-    options.ArchitectureCorpus.Books.Length, booksDir, options.ArchitectureCorpus.Collection);
-
-// --- Qdrant setup: drop + recreate the collection for a deterministic index ---
+// --- Qdrant + embedder (shared across corpora) ---
 using var qdrant = new QdrantClient(
     host: options.Qdrant.Host,
     port: options.Qdrant.Port,
     https: options.Qdrant.UseHttps,
     apiKey: options.Qdrant.ApiKey);
 
-var collectionName = options.ArchitectureCorpus.Collection;
-
-if (await qdrant.CollectionExistsAsync(collectionName))
-{
-    logger.LogInformation("Dropping existing collection {Collection}", collectionName);
-    await qdrant.DeleteCollectionAsync(collectionName);
-}
-
-await qdrant.CreateCollectionAsync(
-    collectionName: collectionName,
-    vectorsConfig: new VectorParams { Size = 1536, Distance = Distance.Cosine });
-
-await qdrant.CreatePayloadIndexAsync(
-    collectionName: collectionName,
-    fieldName: "source_book",
-    schemaType: PayloadSchemaType.Keyword);
-
-// --- Embedder setup ---
 using var http = new HttpClient { BaseAddress = new Uri("https://api.openai.com/v1/") };
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.OpenAi.ApiKey);
 var embedder = new OpenAiEmbedder(http, options.OpenAi.EmbeddingModel, loggerFactory.CreateLogger<OpenAiEmbedder>());
 
-// --- Index each book ---
-var totalChunks = 0;
+// --- Index each enabled corpus ---
+var grandTotalChunks = 0;
 var totalDuration = Stopwatch.StartNew();
 
-foreach (var bookFile in options.ArchitectureCorpus.Books)
+foreach (var corpus in enabledCorpora)
 {
-    var path = Path.Combine(booksDir, bookFile);
-    if (!File.Exists(path))
+    logger.LogInformation("=== Corpus '{Name}' → collection {Collection} ({Books} book(s)) ===",
+        corpus.Name, corpus.Collection, corpus.Books.Length);
+
+    if (string.IsNullOrWhiteSpace(corpus.BooksDirectory) || !Directory.Exists(corpus.BooksDirectory))
     {
-        logger.LogWarning("Skipping missing book: {Path}", path);
+        logger.LogWarning("Skipping corpus {Name}: BooksDirectory missing or not found ({Dir})",
+            corpus.Name, corpus.BooksDirectory);
+        continue;
+    }
+    if (corpus.Books.Length == 0)
+    {
+        logger.LogWarning("Skipping corpus {Name}: Books[] is empty", corpus.Name);
         continue;
     }
 
-    var sw = Stopwatch.StartNew();
-    logger.LogInformation("Reading {Book}", bookFile);
-
-    var pages = ExtractPages(path);
-    if (pages.Count == 0)
+    // Drop + recreate this corpus's collection for a deterministic index.
+    if (await qdrant.CollectionExistsAsync(corpus.Collection))
     {
-        logger.LogWarning("No text extracted from {Book} (image-only PDF?). Skipping.", bookFile);
-        continue;
+        logger.LogInformation("Dropping existing collection {Collection}", corpus.Collection);
+        await qdrant.DeleteCollectionAsync(corpus.Collection);
     }
 
-    var chunks = TextChunker.Chunk(bookFile, pages, targetChars: 2800, overlapChars: 400);
-    logger.LogInformation("  {Pages} pages → {Chunks} chunks", pages.Count, chunks.Count);
+    await qdrant.CreateCollectionAsync(
+        collectionName: corpus.Collection,
+        vectorsConfig: new VectorParams { Size = 1536, Distance = Distance.Cosine });
 
-    // Batch by 64 to keep request size sane.
-    const int embedBatchSize = 64;
-    var batchIndex = 0;
-    foreach (var batch in Batch(chunks, embedBatchSize))
+    await qdrant.CreatePayloadIndexAsync(
+        collectionName: corpus.Collection,
+        fieldName: "source_book",
+        schemaType: PayloadSchemaType.Keyword);
+
+    var corpusChunks = 0;
+
+    foreach (var bookFile in corpus.Books)
     {
-        var vectors = await embedder.EmbedBatchAsync(batch.Select(c => c.Text).ToArray());
-        var points = new List<PointStruct>(batch.Count);
-        for (var i = 0; i < batch.Count; i++)
+        var path = Path.Combine(corpus.BooksDirectory, bookFile);
+        if (!File.Exists(path))
         {
-            var c = batch[i];
-            var point = new PointStruct
-            {
-                Id = new PointId { Uuid = Guid.NewGuid().ToString("N") },
-                Vectors = vectors[i],
-            };
-            point.Payload["text"] = new Value { StringValue = c.Text };
-            point.Payload["source_book"] = new Value { StringValue = c.SourceBook };
-            point.Payload["page_start"] = new Value { IntegerValue = c.PageStart };
-            point.Payload["page_end"] = new Value { IntegerValue = c.PageEnd };
-            point.Payload["chunk_index"] = new Value { IntegerValue = c.ChunkIndex };
-            points.Add(point);
+            logger.LogWarning("Skipping missing book: {Path}", path);
+            continue;
         }
 
-        await qdrant.UpsertAsync(collectionName, points);
-        batchIndex++;
-        logger.LogInformation("  upserted batch {Batch} ({Count} chunks)", batchIndex, batch.Count);
+        var sw = Stopwatch.StartNew();
+        logger.LogInformation("Reading {Book}", bookFile);
+
+        var pages = ExtractPages(path);
+        if (pages.Count == 0)
+        {
+            logger.LogWarning("No text extracted from {Book} (image-only PDF?). Skipping.", bookFile);
+            continue;
+        }
+
+        var chunks = TextChunker.Chunk(bookFile, pages, targetChars: 2800, overlapChars: 400);
+        logger.LogInformation("  {Pages} pages → {Chunks} chunks", pages.Count, chunks.Count);
+
+        const int embedBatchSize = 64;
+        var batchIndex = 0;
+        foreach (var batch in Batch(chunks, embedBatchSize))
+        {
+            var vectors = await embedder.EmbedBatchAsync(batch.Select(c => c.Text).ToArray());
+            var points = new List<PointStruct>(batch.Count);
+            for (var i = 0; i < batch.Count; i++)
+            {
+                var c = batch[i];
+                var point = new PointStruct
+                {
+                    Id = new PointId { Uuid = Guid.NewGuid().ToString("N") },
+                    Vectors = vectors[i],
+                };
+                point.Payload["text"] = new Value { StringValue = c.Text };
+                point.Payload["source_book"] = new Value { StringValue = c.SourceBook };
+                point.Payload["page_start"] = new Value { IntegerValue = c.PageStart };
+                point.Payload["page_end"] = new Value { IntegerValue = c.PageEnd };
+                point.Payload["chunk_index"] = new Value { IntegerValue = c.ChunkIndex };
+                points.Add(point);
+            }
+
+            await qdrant.UpsertAsync(corpus.Collection, points);
+            batchIndex++;
+            logger.LogInformation("  upserted batch {Batch} ({Count} chunks)", batchIndex, batch.Count);
+        }
+
+        corpusChunks += chunks.Count;
+        sw.Stop();
+        logger.LogInformation("  done in {Seconds:F1}s", sw.Elapsed.TotalSeconds);
     }
 
-    totalChunks += chunks.Count;
-    sw.Stop();
-    logger.LogInformation("  done in {Seconds:F1}s", sw.Elapsed.TotalSeconds);
+    logger.LogInformation("Corpus '{Name}' total: {Chunks} chunks", corpus.Name, corpusChunks);
+    grandTotalChunks += corpusChunks;
 }
 
 totalDuration.Stop();
-logger.LogInformation("Indexed {Total} chunks across {Books} book(s) in {Seconds:F1}s",
-    totalChunks, options.ArchitectureCorpus.Books.Length, totalDuration.Elapsed.TotalSeconds);
+logger.LogInformation("Indexed {Total} chunks across {Corpora} corpus(es) in {Seconds:F1}s",
+    grandTotalChunks, enabledCorpora.Count, totalDuration.Elapsed.TotalSeconds);
 return 0;
 
 
