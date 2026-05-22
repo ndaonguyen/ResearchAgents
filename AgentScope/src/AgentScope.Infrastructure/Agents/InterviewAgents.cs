@@ -229,6 +229,186 @@ public sealed class ProbeAgent : IProbeAgent
     }
 }
 
+public sealed class HintAgent : IHintAgent
+{
+    private const string SystemPrompt = """
+        You are a senior interviewer giving the candidate a SMALL hint to help them
+        get unstuck. They have explicitly asked for a hint.
+
+        Rules:
+        - Use SystemDesignCorpus.Search to ground the hint in the same books that
+          will grade the answer. Cite a book + page if a specific chunk is the source.
+        - The hint must POINT at the angle to consider, NOT give the answer.
+          Examples of good hints:
+            "Think about what happens to in-flight writes when the leader fails over."
+            "Consider the trade-off between write-through and write-behind caches
+             (ByteByteGo, pp. 76-80)."
+          Examples of bad hints (DO NOT do this):
+            "The answer is consistent hashing because..."
+            "Use leader-based replication with synchronous followers."
+        - 1-2 sentences. No headings, no bullet lists.
+        - Output ONLY the hint text. No commentary, no "Here's a hint:" preamble.
+        """;
+
+    private readonly IAgentEventBus _bus;
+    private readonly AgentRunContext _runContext;
+    private readonly IKernelFactory _kernelFactory;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
+    private readonly ILogger<HintAgent> _logger;
+
+    public HintAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IKernelFactory kernelFactory,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
+        ILogger<HintAgent> logger)
+    {
+        _bus = bus;
+        _runContext = runContext;
+        _kernelFactory = kernelFactory;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
+        _logger = logger;
+    }
+
+    public async Task<(string Hint, AgentUsage Usage)> HintAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        var agentId = AgentId.Hint;
+        using var _ = _runContext.Push(runId, agentId);
+
+        await _bus.PublishAsync(new AgentStartedEvent(runId, agentId, "Hint", DateTime.UtcNow), ct);
+
+        var kernel = _kernelFactory.Create();
+        var agent = new ChatCompletionAgent
+        {
+            Name = "Hint",
+            Instructions = SystemPrompt,
+            Kernel = kernel,
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
+        };
+
+        var prompt = ProbeAgent.BuildTranscriptPrompt(session) +
+                     "\nThe candidate has asked for a hint. Give them ONE small hint.";
+        var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
+
+        var sb = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
+        var thread = new ChatHistoryAgentThread();
+
+        await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
+        {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+            var delta = update.Message.Content;
+            if (string.IsNullOrEmpty(delta)) continue;
+            sb.Append(delta);
+            await _bus.PublishAsync(new AgentTokenEvent(runId, agentId, delta, DateTime.UtcNow), ct);
+        }
+
+        var hint = sb.ToString().Trim();
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, agentId, hint, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
+
+        return (hint, usage);
+    }
+}
+
+public sealed class ModelAnswerAgent : IModelAnswerAgent
+{
+    private const string SystemPrompt = """
+        You are a senior engineer presenting the model answer to a system-design
+        interview question. The candidate has given up and wants to see how it should
+        be answered.
+
+        Rules:
+        - Use SystemDesignCorpus.Search to ground the answer in the same books that
+          would grade a real attempt. Cite book + page ranges inline, e.g.
+          "(ByteByteGo, pp. 76-80)".
+        - Structure the answer the way a strong interviewer would: state assumptions
+          and rough scale first, then walk through the design decisions with their
+          trade-offs, then call out edge cases / things to discuss further.
+        - 4-8 short paragraphs OR a numbered list of decisions with rationale.
+        - This is the candidate's learning artifact — be specific and dense.
+        - Output ONLY the answer text. No "Here's the model answer:" preamble.
+        """;
+
+    private readonly IAgentEventBus _bus;
+    private readonly AgentRunContext _runContext;
+    private readonly IKernelFactory _kernelFactory;
+    private readonly IUsageCalculator _usageCalculator;
+    private readonly string _model;
+    private readonly ILogger<ModelAnswerAgent> _logger;
+
+    public ModelAnswerAgent(
+        IAgentEventBus bus,
+        AgentRunContext runContext,
+        IKernelFactory kernelFactory,
+        IUsageCalculator usageCalculator,
+        IOptions<AgentScopeOptions> options,
+        ILogger<ModelAnswerAgent> logger)
+    {
+        _bus = bus;
+        _runContext = runContext;
+        _kernelFactory = kernelFactory;
+        _usageCalculator = usageCalculator;
+        _model = options.Value.OpenAi.Model;
+        _logger = logger;
+    }
+
+    public async Task<(string Answer, AgentUsage Usage)> AnswerAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        var agentId = AgentId.ModelAnswer;
+        using var _ = _runContext.Push(runId, agentId);
+
+        await _bus.PublishAsync(new AgentStartedEvent(runId, agentId, "Model Answer", DateTime.UtcNow), ct);
+
+        var kernel = _kernelFactory.Create();
+        var agent = new ChatCompletionAgent
+        {
+            Name = "ModelAnswer",
+            Instructions = SystemPrompt,
+            Kernel = kernel,
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
+        };
+
+        // The interviewer's original question is the first turn in the transcript.
+        var openingQuestion = session.Transcript.FirstOrDefault(t => t.Speaker == Speaker.Interviewer)?.Text
+                              ?? $"(unknown question on topic: {session.Topic.DisplayName})";
+
+        var prompt = $"Topic: {session.Topic.DisplayName}\n\nInterview question:\n{openingQuestion}\n\n" +
+                     "Produce the model answer.";
+        var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
+
+        var sb = new StringBuilder();
+        IReadOnlyDictionary<string, object?>? lastMetadata = null;
+        var thread = new ChatHistoryAgentThread();
+
+        await foreach (var update in agent.InvokeStreamingAsync(userMessage, thread, cancellationToken: ct))
+        {
+            if (update.Message.Metadata is { Count: > 0 } md) lastMetadata = md;
+            var delta = update.Message.Content;
+            if (string.IsNullOrEmpty(delta)) continue;
+            sb.Append(delta);
+            await _bus.PublishAsync(new AgentTokenEvent(runId, agentId, delta, DateTime.UtcNow), ct);
+        }
+
+        var answer = sb.ToString().Trim();
+        var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
+                    ?? new AgentUsage(0, 0, null);
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, agentId, answer, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
+
+        return (answer, usage);
+    }
+}
+
 public sealed class GraderAgent : IGraderAgent
 {
     private const string SystemPrompt = """

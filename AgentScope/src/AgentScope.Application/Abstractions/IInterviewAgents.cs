@@ -27,6 +27,29 @@ public interface IProbeAgent
 }
 
 /// <summary>
+/// Generates a brief, RAG-grounded hint when the candidate asks for one. The hint
+/// points at the angle they should consider — it does NOT give the answer. Capped
+/// in the use case at 2 hints per session.
+/// </summary>
+public interface IHintAgent
+{
+    Task<(string Hint, AgentUsage Usage)> HintAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Generates the canonical/model answer for the interview question when the candidate
+/// gives up. RAG-grounded — the answer is built from the same corpus that grades it,
+/// so the candidate sees the exact reasoning the book would recommend. Triggers a
+/// score-0 finalize in the use case.
+/// </summary>
+public interface IModelAnswerAgent
+{
+    Task<(string Answer, AgentUsage Usage)> AnswerAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Scores the candidate's transcript on a 1-5 scale, producing a list of strengths and
 /// gaps. Implementations should call the system-design corpus to ground gaps in
 /// specific book content (e.g. "missed write-through vs write-behind, ByteByteGo p. 76").

@@ -172,6 +172,7 @@
     .qtext { color: #64748b; font-size: 0.85rem; margin-top: 2px; }
 
     .score-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: 0.85rem; }
+    .score-0 { background: #f1f5f9; color: #475569; }
     .score-1, .score-2 { background: #fee2e2; color: #b91c1c; }
     .score-3 { background: #fef3c7; color: #b45309; }
     .score-4 { background: #d1fae5; color: #047857; }
@@ -228,6 +229,7 @@
     private static MarkupString RenderScore(int? score)
     {
         if (score is null) return new MarkupString("<span class=\"score-na\">—</span>");
+        if (score == 0) return new MarkupString("<span class=\"score-badge score-0\">🏳️</span>");
         return new MarkupString($"<span class=\"score-badge score-{score}\">{score}</span>");
     }
 }

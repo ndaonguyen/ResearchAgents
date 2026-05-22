@@ -68,6 +68,8 @@ public static class InfrastructureServiceCollectionExtensions
         // Interview sub-agents — same lifetime as research agents.
         services.AddScoped<IInterviewerAgent, InterviewerAgent>();
         services.AddScoped<IProbeAgent, ProbeAgent>();
+        services.AddScoped<IHintAgent, HintAgent>();
+        services.AddScoped<IModelAnswerAgent, ModelAnswerAgent>();
         services.AddScoped<IGraderAgent, GraderAgent>();
         services.AddScoped<ICoachAgent, CoachAgent>();
 

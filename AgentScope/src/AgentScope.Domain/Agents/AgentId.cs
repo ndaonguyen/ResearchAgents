@@ -14,6 +14,8 @@ public readonly record struct AgentId(string Value)
     // Interview-mode agents.
     public static AgentId Interviewer { get; } = new("interviewer");
     public static AgentId Probe { get; } = new("probe");
+    public static AgentId Hint { get; } = new("hint");
+    public static AgentId ModelAnswer { get; } = new("model-answer");
     public static AgentId Grader { get; } = new("grader");
     public static AgentId Coach { get; } = new("coach");
 

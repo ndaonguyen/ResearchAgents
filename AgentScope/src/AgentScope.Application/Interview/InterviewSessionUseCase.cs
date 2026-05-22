@@ -23,9 +23,12 @@ namespace AgentScope.Application.Interview;
 public sealed class InterviewSessionUseCase
 {
     private const int MaxProbes = 2;
+    public const int MaxHints = 2;
 
     private readonly IInterviewerAgent _interviewer;
     private readonly IProbeAgent _probe;
+    private readonly IHintAgent _hint;
+    private readonly IModelAnswerAgent _modelAnswer;
     private readonly IGraderAgent _grader;
     private readonly ICoachAgent _coach;
     private readonly IAgentEventBus _bus;
@@ -34,6 +37,8 @@ public sealed class InterviewSessionUseCase
     public InterviewSessionUseCase(
         IInterviewerAgent interviewer,
         IProbeAgent probe,
+        IHintAgent hint,
+        IModelAnswerAgent modelAnswer,
         IGraderAgent grader,
         ICoachAgent coach,
         IAgentEventBus bus,
@@ -41,11 +46,17 @@ public sealed class InterviewSessionUseCase
     {
         _interviewer = interviewer;
         _probe = probe;
+        _hint = hint;
+        _modelAnswer = modelAnswer;
         _grader = grader;
         _coach = coach;
         _bus = bus;
         _logger = logger;
     }
+
+    /// <summary>Counts hints already asked in the session. Used by the UI to disable the hint button at the cap.</summary>
+    public static int HintsUsed(InterviewSession session) =>
+        session.Transcript.Count(t => t.Speaker == Speaker.Hint);
 
     /// <summary>
     /// Creates a new session and generates the opening question. Returns the session
@@ -82,6 +93,55 @@ public sealed class InterviewSessionUseCase
 
         session.Transcript.Add(new InterviewTurn(Speaker.Probe, probe, DateTime.UtcNow));
         return probe;
+    }
+
+    /// <summary>
+    /// Requests a hint mid-session. Returns the hint text and appends a <see cref="Speaker.Hint"/>
+    /// turn to the transcript so the grader sees the candidate needed help. Returns null
+    /// when the hint cap (<see cref="MaxHints"/>) has been reached.
+    /// </summary>
+    public async Task<string?> RequestHintAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        if (HintsUsed(session) >= MaxHints) return null;
+
+        var (hint, _) = await _hint.HintAsync(session, runId, ct);
+        if (string.IsNullOrWhiteSpace(hint)) return null;
+
+        session.Transcript.Add(new InterviewTurn(Speaker.Hint, hint, DateTime.UtcNow));
+        return hint;
+    }
+
+    /// <summary>
+    /// Candidate gave up. Produces the canonical model answer (RAG-grounded) so they
+    /// can compare/study, then finalises the session with a forced score of 0. Skips
+    /// the grader call — the score is fixed, no point spending tokens grading what was
+    /// effectively skipped — but still runs the coach so the candidate gets study
+    /// suggestions for next time.
+    /// </summary>
+    public async Task ShowAnswerAndFinalizeAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        var (modelAnswer, modelUsage) = await _modelAnswer.AnswerAsync(session, runId, ct);
+        session.Transcript.Add(new InterviewTurn(Speaker.ModelAnswer, modelAnswer, DateTime.UtcNow));
+
+        // Force a "gave up" grade. The coach reads this + the transcript and produces
+        // study suggestions that target the gap.
+        var gaveUpGrade = new Grade(
+            Score: 0,
+            Strengths: Array.Empty<string>(),
+            Gaps: new[] { "Candidate requested the model answer rather than working through the question." });
+        session.FinalGrade = gaveUpGrade;
+
+        var (coaching, coachUsage) = await _coach.CoachAsync(session, gaveUpGrade, runId, ct);
+        session.FinalCoaching = coaching;
+
+        var totalUsage = modelUsage.Add(coachUsage);
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, AgentId.System, coaching.Summary,
+            totalUsage.TokensIn, totalUsage.TokensOut, totalUsage.CostUsd,
+            DateTime.UtcNow), ct);
     }
 
     /// <summary>

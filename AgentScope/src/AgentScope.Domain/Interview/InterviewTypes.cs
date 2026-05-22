@@ -63,7 +63,7 @@ public sealed class InterviewSession
 /// </summary>
 public sealed record InterviewTurn(Speaker Speaker, string Text, DateTime Timestamp);
 
-public enum Speaker { Interviewer, User, Probe }
+public enum Speaker { Interviewer, User, Probe, Hint, ModelAnswer }
 
 public sealed record Grade(int Score, IReadOnlyList<string> Strengths, IReadOnlyList<string> Gaps);
 

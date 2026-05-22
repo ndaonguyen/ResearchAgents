@@ -74,12 +74,45 @@
         {
             <section class="answer-input">
                 <textarea @bind="_userInput" @bind:event="oninput"
-                          placeholder="Type your answer here. Be specific — talk through trade-offs, scale, edge cases."
-                          disabled="@_busy" rows="8"></textarea>
-                <button class="primary" @onclick="SubmitAnswer"
-                        disabled="@(_busy || string.IsNullOrWhiteSpace(_userInput))">
-                    @(_busy ? "Working…" : "Submit answer")
-                </button>
+                          placeholder="Type your answer here, or click the mic to speak. Be specific — talk through trade-offs, scale, edge cases."
+                          disabled="@(_busy || _listening)" rows="8"></textarea>
+
+                @if (!string.IsNullOrEmpty(_interimTranscript))
+                {
+                    <div class="interim-transcript">…@_interimTranscript</div>
+                }
+
+                @if (!string.IsNullOrEmpty(_sttError))
+                {
+                    <div class="stt-error">Mic error: @_sttError</div>
+                }
+
+                <div class="answer-actions">
+                    @if (_sttAvailable)
+                    {
+                        <button class="mic-btn @(_listening ? "listening" : "")" @onclick="ToggleListening" disabled="@_busy">
+                            @(_listening ? "🛑 Stop listening" : "🎤 Speak")
+                        </button>
+                    }
+                    <button class="hint-btn" @onclick="RequestHint"
+                            disabled="@(_busy || _listening || HintsRemaining == 0)"
+                            title="@(HintsRemaining > 0 ? $"{HintsRemaining} hint(s) remaining" : "No hints left")">
+                        💡 Hint
+                        @if (HintsRemaining < InterviewSessionUseCase.MaxHints)
+                        {
+                            <span class="hint-count">(@HintsRemaining left)</span>
+                        }
+                    </button>
+                    <button class="giveup-btn" @onclick="ShowAnswer"
+                            disabled="@(_busy || _listening)"
+                            title="Give up and see the model answer. This question scores 0.">
+                        🏳️ Show answer
+                    </button>
+                    <button class="primary" @onclick="SubmitAnswer"
+                            disabled="@(_busy || _listening || string.IsNullOrWhiteSpace(_userInput))">
+                        @(_busy ? "Working…" : "Submit answer")
+                    </button>
+                </div>
             </section>
         }
         else
@@ -87,7 +120,10 @@
             <section class="grade-card">
                 <div class="score-row">
                     <h2>Grade</h2>
-                    <div class="score-badge score-@_session.FinalGrade.Score">@_session.FinalGrade.Score / 5</div>
+                    <div class="score-badge score-@_session.FinalGrade.Score">
+                        @if (_session.FinalGrade.Score == 0) { <span>🏳️ Gave up</span> }
+                        else { <span>@_session.FinalGrade.Score / 5</span> }
+                    </div>
                 </div>
 
                 @if (_session.FinalGrade.Strengths.Any())
@@ -160,10 +196,29 @@
     .turn-user .speaker { color: #15803d; }
     .turn-streaming { background: #f8fafc; border-color: #e2e8f0; opacity: 0.85; }
     .turn-streaming .speaker { color: #475569; }
+    .turn-hint { background: #faf5ff; border-color: #d8b4fe; }
+    .turn-hint .speaker { color: #7c3aed; }
+    .turn-modelanswer { background: #fef3c7; border-color: #fcd34d; }
+    .turn-modelanswer .speaker { color: #b45309; }
+    .turn-modelanswer .text { font-size: 0.95rem; line-height: 1.6; }
 
     .answer-input { display: flex; flex-direction: column; gap: 12px; }
     .answer-input textarea { padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit; font-size: 0.95rem; resize: vertical; }
-    .answer-input button { align-self: flex-end; }
+    .answer-actions { display: flex; gap: 12px; justify-content: flex-end; align-items: center; }
+    .mic-btn { padding: 10px 18px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+    .mic-btn:hover { background: #f8fafc; }
+    .mic-btn.listening { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; animation: pulse 1.4s ease-in-out infinite; }
+    @@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    .hint-btn { padding: 10px 16px; border: 1px solid #d8b4fe; background: #faf5ff; color: #7c3aed; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+    .hint-btn:hover:not(:disabled) { background: #f3e8ff; }
+    .hint-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .hint-count { margin-left: 4px; font-size: 0.8rem; color: #94a3b8; font-weight: 400; }
+    .giveup-btn { padding: 10px 16px; border: 1px solid #fcd34d; background: #fef3c7; color: #b45309; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+    .giveup-btn:hover:not(:disabled) { background: #fde68a; }
+    .giveup-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .score-0 { background: #f1f5f9; color: #475569; }
+    .interim-transcript { padding: 8px 12px; background: #f8fafc; border-left: 3px solid #94a3b8; font-style: italic; color: #475569; font-size: 0.9rem; }
+    .stt-error { padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 6px; font-size: 0.85rem; }
 
     .grade-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; }
     .grade-card h2, .grade-card h3, .grade-card h4 { margin-top: 0; }
@@ -201,6 +256,14 @@
     private bool _ttsAvailable;
     private bool _muted;
 
+    private IJSObjectReference? _sttModule;
+    private bool _sttAvailable;
+    private bool _listening;
+    private string _committedTranscript = "";
+    private string _interimTranscript = "";
+    private string? _sttError;
+    private DotNetObjectReference<Interview>? _selfRef;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -208,13 +271,91 @@
         {
             _ttsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/interview-tts.js");
             _ttsAvailable = await _ttsModule.InvokeAsync<bool>("isAvailable");
-            if (_ttsAvailable) StateHasChanged();
         }
         catch
         {
-            // SSR pre-render or JS unavailable — leave _ttsAvailable false; mute toggle simply hides.
             _ttsAvailable = false;
         }
+
+        try
+        {
+            _sttModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/interview-stt.js");
+            _sttAvailable = await _sttModule.InvokeAsync<bool>("isAvailable");
+            if (_sttAvailable)
+            {
+                _selfRef = DotNetObjectReference.Create(this);
+            }
+        }
+        catch
+        {
+            _sttAvailable = false;
+        }
+
+        if (_ttsAvailable || _sttAvailable) StateHasChanged();
+    }
+
+    private async Task ToggleListening()
+    {
+        if (_sttModule is null || _selfRef is null) return;
+
+        if (_listening)
+        {
+            await _sttModule.InvokeVoidAsync("stopListening");
+            // onend callback flips _listening false; we don't need to do it here.
+            return;
+        }
+
+        _sttError = null;
+        _committedTranscript = _userInput;
+        _interimTranscript = "";
+        var ok = await _sttModule.InvokeAsync<bool>("startListening", _selfRef);
+        if (ok)
+        {
+            _listening = true;
+        }
+        else
+        {
+            _sttError = "Could not start speech recognition.";
+        }
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public Task OnTranscript(string final, string interim)
+    {
+        if (!string.IsNullOrEmpty(final))
+        {
+            _committedTranscript = string.IsNullOrEmpty(_committedTranscript)
+                ? final
+                : _committedTranscript + " " + final;
+            _userInput = _committedTranscript;
+        }
+        _interimTranscript = interim;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnRecognitionError(string error)
+    {
+        _sttError = error switch
+        {
+            "not-allowed" => "Microphone permission denied.",
+            "no-speech" => "No speech detected.",
+            "audio-capture" => "No microphone found.",
+            _ => error
+        };
+        _listening = false;
+        _interimTranscript = "";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnRecognitionEnd()
+    {
+        _listening = false;
+        // Any leftover interim text is dropped — only committed/final transcripts persist.
+        _interimTranscript = "";
+        return InvokeAsync(StateHasChanged);
     }
 
     private void ToggleMute()
@@ -228,7 +369,10 @@
         if (_muted || !_ttsAvailable || _ttsModule is null || _session is null) return;
         var last = _session.Transcript.LastOrDefault();
         if (last is null) return;
-        if (last.Speaker != Speaker.Interviewer && last.Speaker != Speaker.Probe) return;
+        // Read aloud anything from the AI side — interviewer question, probe follow-up, or hint.
+        if (last.Speaker != Speaker.Interviewer
+            && last.Speaker != Speaker.Probe
+            && last.Speaker != Speaker.Hint) return;
 
         try
         {
@@ -274,8 +418,17 @@
     {
         if (_session is null || string.IsNullOrWhiteSpace(_userInput)) return;
 
+        // If the user is still mid-dictation, stop listening before submitting.
+        if (_listening && _sttModule is not null)
+        {
+            try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
+            _listening = false;
+        }
+
         var answer = _userInput;
         _userInput = "";
+        _committedTranscript = "";
+        _interimTranscript = "";
         _busy = true;
         StateHasChanged();
 
@@ -308,7 +461,15 @@
         _subscriptionCts = null;
         _session = null;
         _userInput = "";
+        _committedTranscript = "";
+        _interimTranscript = "";
+        _sttError = null;
         _currentAgentMessage = null;
+        if (_listening && _sttModule is not null)
+        {
+            try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
+            _listening = false;
+        }
         await CancelSpeechAsync();
     }
 
@@ -383,10 +544,70 @@
         await Persister.PersistAsync(row);
     }
 
+    private int HintsRemaining =>
+        _session is null ? InterviewSessionUseCase.MaxHints
+            : Math.Max(0, InterviewSessionUseCase.MaxHints - InterviewSessionUseCase.HintsUsed(_session));
+
+    private async Task RequestHint()
+    {
+        if (_session is null || _busy || _listening) return;
+        if (HintsRemaining == 0) return;
+
+        _busy = true;
+        StateHasChanged();
+
+        try
+        {
+            await Session.RequestHintAsync(_session, _runId);
+        }
+        finally
+        {
+            _busy = false;
+            _currentAgentMessage = null;
+            StateHasChanged();
+        }
+
+        // Speak the hint just like the interviewer's questions, if voice is on.
+        await SpeakLatestInterviewerTurnAsync();
+    }
+
+    private async Task ShowAnswer()
+    {
+        if (_session is null || _busy || _listening) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Show the model answer? This question will be scored 0 and the session will end.");
+        if (!confirmed) return;
+
+        // Stop any in-progress mic capture before we burn through tokens generating the answer.
+        if (_listening && _sttModule is not null)
+        {
+            try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
+            _listening = false;
+        }
+
+        _busy = true;
+        StateHasChanged();
+
+        try
+        {
+            await Session.ShowAnswerAndFinalizeAsync(_session, _runId);
+            await PersistSessionAsync();
+        }
+        finally
+        {
+            _busy = false;
+            _currentAgentMessage = null;
+            StateHasChanged();
+        }
+    }
+
     private static string LabelFor(Speaker s) => s switch
     {
         Speaker.Interviewer => "Interviewer",
         Speaker.Probe => "Interviewer (follow-up)",
+        Speaker.Hint => "💡 Hint",
+        Speaker.ModelAnswer => "🏳️ Model answer",
         Speaker.User => "You",
         _ => s.ToString()
     };
@@ -396,9 +617,15 @@
         _subscriptionCts?.Cancel();
         _subscriptionCts?.Dispose();
         await CancelSpeechAsync();
+        if (_sttModule is not null)
+        {
+            try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
+            try { await _sttModule.DisposeAsync(); } catch { }
+        }
         if (_ttsModule is not null)
         {
             try { await _ttsModule.DisposeAsync(); } catch { /* circuit closing */ }
         }
+        _selfRef?.Dispose();
     }
 }
