@@ -16,6 +16,7 @@ builder.Services
     .AddInfrastructure(builder.Configuration);
 
 builder.Services.AddScoped<EvalResultsReader>();
+builder.Services.AddSingleton<RunPersister>();
 
 var app = builder.Build();
 
