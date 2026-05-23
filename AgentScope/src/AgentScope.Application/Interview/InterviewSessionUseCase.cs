@@ -62,6 +62,22 @@ public sealed class InterviewSessionUseCase
     public static int HintsUsed(InterviewSession session) =>
         session.Transcript.Count(t => t.Speaker == Speaker.Hint);
 
+    /// <summary>Adds an agent's usage onto the session totals. Null cost is treated as "missing data" (kept as null until something with a known cost arrives).</summary>
+    private static void Accumulate(InterviewSession session, AgentUsage usage)
+    {
+        session.TotalTokensIn += usage.TokensIn;
+        session.TotalTokensOut += usage.TokensOut;
+        session.TotalCostUsd = AddCost(session.TotalCostUsd, usage.CostUsd);
+    }
+
+    private static decimal? AddCost(decimal? a, decimal? b) => (a, b) switch
+    {
+        (null, null) => null,
+        (null, _)    => b,
+        (_, null)    => a,
+        _            => a + b
+    };
+
     /// <summary>
     /// Creates a new session and generates the opening question. Returns the session
     /// + the RunId used for event-bus subscription so the caller can stream events.
@@ -71,7 +87,8 @@ public sealed class InterviewSessionUseCase
     {
         var session = new InterviewSession(Guid.NewGuid().ToString("N"), topic);
 
-        var (question, _) = await _interviewer.AskAsync(topic, runId, ct);
+        var (question, usage) = await _interviewer.AskAsync(topic, runId, ct);
+        Accumulate(session, usage);
         session.Transcript.Add(new InterviewTurn(Speaker.Interviewer, question, DateTime.UtcNow));
 
         return session;
@@ -92,7 +109,8 @@ public sealed class InterviewSessionUseCase
         var probesAskedSoFar = session.Transcript.Count(t => t.Speaker == Speaker.Probe);
         if (probesAskedSoFar >= MaxProbes) return null;
 
-        var (probe, _) = await _probe.ConsiderProbeAsync(session, runId, ct);
+        var (probe, usage) = await _probe.ConsiderProbeAsync(session, runId, ct);
+        Accumulate(session, usage);
         if (string.IsNullOrWhiteSpace(probe)) return null;
 
         session.Transcript.Add(new InterviewTurn(Speaker.Probe, probe, DateTime.UtcNow));
@@ -109,7 +127,8 @@ public sealed class InterviewSessionUseCase
     {
         if (HintsUsed(session) >= MaxHints) return null;
 
-        var (hint, _) = await _hint.HintAsync(session, runId, ct);
+        var (hint, usage) = await _hint.HintAsync(session, runId, ct);
+        Accumulate(session, usage);
         if (string.IsNullOrWhiteSpace(hint)) return null;
 
         session.Transcript.Add(new InterviewTurn(Speaker.Hint, hint, DateTime.UtcNow));
@@ -127,7 +146,8 @@ public sealed class InterviewSessionUseCase
         batchSize = Math.Clamp(batchSize, 1, 10);
         var session = new InterviewSession(Guid.NewGuid().ToString("N"), topic, InterviewMode.QuickCheck);
         session.BatchSize = batchSize;
-        var (questions, _) = await _quickCheck.GenerateBatchAsync(topic, batchSize, runId, ct);
+        var (questions, usage) = await _quickCheck.GenerateBatchAsync(topic, batchSize, runId, ct);
+        RecordBatchUsage(session, usage);
         session.Questions = questions;
         ResetPicksForBatch(session);
         return session;
@@ -143,13 +163,27 @@ public sealed class InterviewSessionUseCase
     {
         if (session.Mode != InterviewMode.QuickCheck) return;
 
-        var (questions, _) = await _quickCheck.GenerateBatchAsync(session.Topic, session.BatchSize, runId, ct);
+        var (questions, usage) = await _quickCheck.GenerateBatchAsync(session.Topic, session.BatchSize, runId, ct);
+        RecordBatchUsage(session, usage);
         session.Questions = questions;
         session.Grades = null;
         session.BatchSubmitted = false;
         session.FinalGrade = null;
         session.FinalCoaching = null;
         ResetPicksForBatch(session);
+    }
+
+    /// <summary>
+    /// Captures the most recent QuickCheck batch generation cost on the session AND adds
+    /// it to the running totals. The UI uses <see cref="InterviewSession.LastBatchTokensIn"/>
+    /// (and friends) to attribute per-question cost when it writes one row per MCQ.
+    /// </summary>
+    private static void RecordBatchUsage(InterviewSession session, AgentUsage usage)
+    {
+        session.LastBatchTokensIn = usage.TokensIn;
+        session.LastBatchTokensOut = usage.TokensOut;
+        session.LastBatchCostUsd = usage.CostUsd;
+        Accumulate(session, usage);
     }
 
     /// <summary>
@@ -196,7 +230,7 @@ public sealed class InterviewSessionUseCase
 
         await _bus.PublishAsync(new AgentFinishedEvent(
             runId, AgentId.System, session.FinalCoaching.Summary,
-            TokensIn: 0, TokensOut: 0, EstimatedCostUsd: null,
+            session.TotalTokensIn, session.TotalTokensOut, session.TotalCostUsd,
             DateTime.UtcNow), ct);
     }
 
@@ -259,6 +293,7 @@ public sealed class InterviewSessionUseCase
         InterviewSession session, RunId runId, CancellationToken ct = default)
     {
         var (modelAnswer, modelUsage) = await _modelAnswer.AnswerAsync(session, runId, ct);
+        Accumulate(session, modelUsage);
         session.Transcript.Add(new InterviewTurn(Speaker.ModelAnswer, modelAnswer, DateTime.UtcNow));
 
         // Force a "gave up" grade. The coach reads this + the transcript and produces
@@ -270,13 +305,12 @@ public sealed class InterviewSessionUseCase
         session.FinalGrade = gaveUpGrade;
 
         var (coaching, coachUsage) = await _coach.CoachAsync(session, gaveUpGrade, runId, ct);
+        Accumulate(session, coachUsage);
         session.FinalCoaching = coaching;
-
-        var totalUsage = modelUsage.Add(coachUsage);
 
         await _bus.PublishAsync(new AgentFinishedEvent(
             runId, AgentId.System, coaching.Summary,
-            totalUsage.TokensIn, totalUsage.TokensOut, totalUsage.CostUsd,
+            session.TotalTokensIn, session.TotalTokensOut, session.TotalCostUsd,
             DateTime.UtcNow), ct);
     }
 
@@ -285,23 +319,44 @@ public sealed class InterviewSessionUseCase
     /// <see cref="AgentFinishedEvent"/> terminating the event stream, so the Web app
     /// can clean up its subscription the same way it does for research runs.
     /// </summary>
+    /// <summary>
+    /// Generates the next Discussion question on the same topic, reusing the existing
+    /// session. Clears the transcript and final grade/coaching so the UI starts fresh,
+    /// but keeps the session ID and running token/cost totals so multi-question drills
+    /// stay correlated in Past Runs.
+    /// </summary>
+    public async Task NextDiscussionQuestionAsync(
+        InterviewSession session, RunId runId, CancellationToken ct = default)
+    {
+        if (session.Mode != InterviewMode.Discussion) return;
+
+        session.Transcript.Clear();
+        session.FinalGrade = null;
+        session.FinalCoaching = null;
+
+        var (question, usage) = await _interviewer.AskAsync(session.Topic, runId, ct);
+        Accumulate(session, usage);
+        session.Transcript.Add(new InterviewTurn(Speaker.Interviewer, question, DateTime.UtcNow));
+    }
+
     public async Task FinalizeAsync(
         InterviewSession session, RunId runId, CancellationToken ct = default)
     {
         var (grade, gradeUsage) = await _grader.GradeAsync(session, runId, ct);
+        Accumulate(session, gradeUsage);
         session.FinalGrade = grade;
 
         var (coaching, coachUsage) = await _coach.CoachAsync(session, grade, runId, ct);
+        Accumulate(session, coachUsage);
         session.FinalCoaching = coaching;
-
-        var totalUsage = gradeUsage.Add(coachUsage);
 
         // Terminal event — closes the event stream subscription on the caller's side.
         // FinalText carries the coach summary; the full session payload is held by the
-        // caller and persisted there.
+        // caller and persisted there. Tokens/cost are the session-wide totals across
+        // every agent call (interviewer + probes + hints + grader + coach + any model answer).
         await _bus.PublishAsync(new AgentFinishedEvent(
             runId, AgentId.System, coaching.Summary,
-            totalUsage.TokensIn, totalUsage.TokensOut, totalUsage.CostUsd,
+            session.TotalTokensIn, session.TotalTokensOut, session.TotalCostUsd,
             DateTime.UtcNow), ct);
     }
 }

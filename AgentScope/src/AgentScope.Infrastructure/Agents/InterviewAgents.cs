@@ -24,17 +24,21 @@ namespace AgentScope.Infrastructure.Agents;
 public sealed class InterviewerAgent : IInterviewerAgent
 {
     private const string SystemPrompt = """
-        You are a senior engineering interviewer running a system-design interview.
-        Generate ONE realistic interview question for the given topic.
+        You are a senior engineering interviewer. Generate ONE realistic interview
+        question for the given topic.
 
         Rules:
-        - Use SystemDesignCorpus.Search FIRST to ground the question in what the books
-          actually cover. Aim for a question similar in style and depth to those in
-          Alex Xu's "System Design Interview" or ByteByteGo's worked examples.
+        - Use the corpus tool named in the user message (one of
+          SystemDesignCorpus.Search or ArchitectureCorpus.Search) FIRST to ground the
+          question in what the books actually cover. Do not call other corpora.
+        - Style and depth should match the source: SystemDesign topics produce
+          interview-style design questions; Architecture topics produce open-ended
+          architectural reasoning questions about patterns, trade-offs, and decomposition.
         - The question should be open-ended enough to test depth, but specific enough
           that a candidate can begin reasoning about it within a minute.
         - Include explicit scale/constraints when the topic warrants them (e.g.
-          "handle 1M requests/sec with p99 < 100ms").
+          "handle 1M requests/sec with p99 < 100ms" for system-design topics; "for a
+          150-engineer e-commerce platform" for architecture topics).
         - Do NOT add commentary, hints, or follow-ups. Output ONLY the question text.
         - Keep it 1-3 sentences.
         """;
@@ -79,8 +83,11 @@ public sealed class InterviewerAgent : IInterviewerAgent
             Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
         };
 
+        var corpus = InterviewTrackCorpus.CorpusPluginName(topic.Track);
         var userMessage = new ChatMessageContent(AuthorRole.User,
-            $"Topic: {topic.DisplayName}\n\nGenerate one interview question on this topic.");
+            $"Topic: {topic.DisplayName} (track: {topic.Track})\n" +
+            $"Use {corpus}.Search to ground the question.\n\n" +
+            "Generate one interview question on this topic.");
 
         var (text, usage) = await StreamAgent(agent, userMessage, runId, agentId, ct);
         return (text.Trim(), usage);
@@ -236,8 +243,9 @@ public sealed class HintAgent : IHintAgent
         get unstuck. They have explicitly asked for a hint.
 
         Rules:
-        - Use SystemDesignCorpus.Search to ground the hint in the same books that
-          will grade the answer. Cite a book + page if a specific chunk is the source.
+        - Use the corpus tool named in the user message (one of SystemDesignCorpus.Search
+          or ArchitectureCorpus.Search) to ground the hint. Cite a book + page if a
+          specific chunk is the source.
         - The hint must POINT at the angle to consider, NOT give the answer.
           Examples of good hints:
             "Think about what happens to in-flight writes when the leader fails over."
@@ -290,7 +298,9 @@ public sealed class HintAgent : IHintAgent
             Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
         };
 
-        var prompt = ProbeAgent.BuildTranscriptPrompt(session) +
+        var corpus = InterviewTrackCorpus.CorpusPluginName(session.Topic.Track);
+        var prompt = $"Use {corpus}.Search to ground the hint.\n\n" +
+                     ProbeAgent.BuildTranscriptPrompt(session) +
                      "\nThe candidate has asked for a hint. Give them ONE small hint.";
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
 
@@ -321,14 +331,14 @@ public sealed class HintAgent : IHintAgent
 public sealed class ModelAnswerAgent : IModelAnswerAgent
 {
     private const string SystemPrompt = """
-        You are a senior engineer presenting the model answer to a system-design
-        interview question. The candidate has given up and wants to see how it should
-        be answered.
+        You are a senior engineer presenting the model answer to an interview question.
+        The candidate has given up and wants to see how it should be answered.
 
         Rules:
-        - Use SystemDesignCorpus.Search to ground the answer in the same books that
-          would grade a real attempt. Cite book + page ranges inline, e.g.
-          "(ByteByteGo, pp. 76-80)".
+        - Use the corpus tool named in the user message (one of SystemDesignCorpus.Search
+          or ArchitectureCorpus.Search) to ground the answer in the same books that would
+          grade a real attempt. Cite book + page ranges inline, e.g.
+          "(ByteByteGo, pp. 76-80)" or "(Software Architecture - The Hard Parts, pp. 47-49)".
         - Structure the answer the way a strong interviewer would: state assumptions
           and rough scale first, then walk through the design decisions with their
           trade-offs, then call out edge cases / things to discuss further.
@@ -381,7 +391,10 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
         var openingQuestion = session.Transcript.FirstOrDefault(t => t.Speaker == Speaker.Interviewer)?.Text
                               ?? $"(unknown question on topic: {session.Topic.DisplayName})";
 
-        var prompt = $"Topic: {session.Topic.DisplayName}\n\nInterview question:\n{openingQuestion}\n\n" +
+        var corpus = InterviewTrackCorpus.CorpusPluginName(session.Topic.Track);
+        var prompt = $"Topic: {session.Topic.DisplayName} (track: {session.Topic.Track})\n" +
+                     $"Use {corpus}.Search to ground the answer.\n\n" +
+                     $"Interview question:\n{openingQuestion}\n\n" +
                      "Produce the model answer.";
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
 
@@ -412,14 +425,15 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
 public sealed class QuickCheckAgent : IQuickCheckAgent
 {
     private const string SystemPrompt = """
-        You generate a BATCH of multiple-choice questions on the given system-design topic
-        for a quick concept check.
+        You generate a BATCH of multiple-choice questions on the given topic for a quick
+        concept check.
 
         Rules:
         - The N questions must each cover a DISTINCT angle of the topic. Do not repeat the
           same concept across questions.
-        - Use SystemDesignCorpus.Search to ground each question in what the books actually
-          cover. Different questions can cite different chunks.
+        - Use the corpus tool named in the user message (one of SystemDesignCorpus.Search
+          or ArchitectureCorpus.Search) to ground each question in what the books actually
+          cover. Different questions can cite different chunks. Do not call other corpora.
         - 4 options per question. Mix concrete facts with plausible-but-wrong distractors.
         - Correct count per question is 1 OR more — pick what's appropriate. Some questions
           are clean single-answer ("Which is the PRIMARY purpose of consistent hashing?"),
@@ -491,9 +505,11 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
                 functionChoice: FunctionChoiceBehavior.Auto()))
         };
 
+        var corpus = InterviewTrackCorpus.CorpusPluginName(topic.Track);
         var userMessage = new ChatMessageContent(AuthorRole.User,
-            $"Topic: {topic.DisplayName}\n\nGenerate {count} distinct MCQs on this topic. " +
-            "Make sure each covers a different angle.");
+            $"Topic: {topic.DisplayName} (track: {topic.Track})\n" +
+            $"Use {corpus}.Search to ground each question.\n\n" +
+            $"Generate {count} distinct MCQs on this topic. Make sure each covers a different angle.");
 
         var sb = new StringBuilder();
         IReadOnlyDictionary<string, object?>? lastMetadata = null;
@@ -601,9 +617,10 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
 public sealed class GraderAgent : IGraderAgent
 {
     private const string SystemPrompt = """
-        You are grading a candidate's system-design interview transcript on a 1-5 scale.
-        Use SystemDesignCorpus.Search to look up what canonical answers cover, so your
-        gaps are grounded in specific book content (cite the book + page when possible).
+        You are grading a candidate's interview transcript on a 1-5 scale. Use the corpus
+        tool named in the user message (one of SystemDesignCorpus.Search or
+        ArchitectureCorpus.Search) to look up what canonical answers cover, so your gaps
+        are grounded in specific book content (cite the book + page when possible).
 
         Scoring rubric:
         - 5: comprehensive — covers trade-offs, scale, edge cases, with concrete reasoning
@@ -665,8 +682,10 @@ public sealed class GraderAgent : IGraderAgent
                 functionChoice: FunctionChoiceBehavior.Auto()))
         };
 
-        var prompt = ProbeAgent.BuildTranscriptPrompt(session) +
-                     "\nGrade the candidate's performance. Use SystemDesignCorpus.Search to ground gaps.";
+        var corpus = InterviewTrackCorpus.CorpusPluginName(session.Topic.Track);
+        var prompt = $"Use {corpus}.Search to ground gaps.\n\n" +
+                     ProbeAgent.BuildTranscriptPrompt(session) +
+                     "\nGrade the candidate's performance.";
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
 
         var sb = new StringBuilder();

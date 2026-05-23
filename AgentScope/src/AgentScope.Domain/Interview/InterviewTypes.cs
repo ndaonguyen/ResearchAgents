@@ -1,40 +1,83 @@
 namespace AgentScope.Domain.Interview;
 
 /// <summary>
-/// Curated list of system-design interview topics, derived from chapter coverage in
-/// ByteByteGo and Alex Xu's <c>System Design Interview</c>. Topics are split into
-/// "Concepts" (canonical building blocks) and "Design exercises" (worked end-to-end
-/// system designs) so the UI can group them.
+/// Curated list of interview topics, split across two tracks:
+/// <list type="bullet">
+///   <item><see cref="InterviewTrack.SystemDesign"/> — drawn from ByteByteGo + Alex Xu's <c>System Design Interview</c>.</item>
+///   <item><see cref="InterviewTrack.Architecture"/> — drawn from DDD Distilled, Hard Parts, Microservices Patterns, Evolutionary Architectures, Monolith to Microservices.</item>
+/// </list>
+/// Within each track, topics are grouped into Concepts (building blocks) and Exercises
+/// (worked design problems) for UI organisation. The agents read <see cref="InterviewTopic.Track"/>
+/// to decide which RAG corpus (<c>ArchitectureCorpus</c> vs <c>SystemDesignCorpus</c>) to ground in.
 /// </summary>
 public static class InterviewTopics
 {
     public static IReadOnlyList<InterviewTopic> All { get; } = new[]
     {
-        // Concepts
-        new InterviewTopic("caching",           "Distributed caching",                  TopicGroup.Concept),
-        new InterviewTopic("sharding",          "Database sharding & partitioning",     TopicGroup.Concept),
-        new InterviewTopic("replication",       "Replication & consistency models",     TopicGroup.Concept),
-        new InterviewTopic("load-balancing",    "Load balancing",                       TopicGroup.Concept),
-        new InterviewTopic("queues",            "Message queues & async processing",    TopicGroup.Concept),
-        new InterviewTopic("rate-limiting",     "Rate limiting",                        TopicGroup.Concept),
-        new InterviewTopic("consistent-hash",   "Consistent hashing",                   TopicGroup.Concept),
-        new InterviewTopic("capacity",          "Capacity estimation & back-of-envelope", TopicGroup.Concept),
+        // -------- System Design — Concepts --------
+        new InterviewTopic("caching",           "Distributed caching",                    TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("sharding",          "Database sharding & partitioning",       TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("replication",       "Replication & consistency models",       TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("load-balancing",    "Load balancing",                         TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("queues",            "Message queues & async processing",      TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("rate-limiting",     "Rate limiting",                          TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("consistent-hash",   "Consistent hashing",                     TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("capacity",          "Capacity estimation & back-of-envelope", TopicGroup.Concept,  InterviewTrack.SystemDesign),
 
-        // Design exercises
-        new InterviewTopic("url-shortener",     "Design a URL shortener",               TopicGroup.Exercise),
-        new InterviewTopic("chat-system",       "Design a chat system",                 TopicGroup.Exercise),
-        new InterviewTopic("news-feed",         "Design a news feed",                   TopicGroup.Exercise),
-        new InterviewTopic("notification",      "Design a notification system",         TopicGroup.Exercise),
-        new InterviewTopic("rate-limiter-svc",  "Design a rate-limiter service",        TopicGroup.Exercise),
+        // -------- System Design — Design exercises --------
+        new InterviewTopic("url-shortener",     "Design a URL shortener",                 TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("chat-system",       "Design a chat system",                   TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("news-feed",         "Design a news feed",                     TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("notification",      "Design a notification system",           TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("rate-limiter-svc",  "Design a rate-limiter service",          TopicGroup.Exercise, InterviewTrack.SystemDesign),
+
+        // -------- Architecture — Concepts --------
+        new InterviewTopic("ddd-bounded",       "Bounded contexts & ubiquitous language", TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("micro-vs-mono",     "Microservices vs monolith trade-offs",   TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("arch-ilities",      "Architecture characteristics (\"ilities\")", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("evolutionary",      "Evolutionary architecture & fitness functions", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("arch-styles",       "Architectural styles (layered, hexagonal, event-driven, microkernel)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("service-granularity","Service granularity & decomposition",   TopicGroup.Concept,  InterviewTrack.Architecture),
+
+        // -------- Architecture — Design exercises --------
+        new InterviewTopic("decompose-mono",    "Decompose a monolith into services",     TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("apply-ddd",         "Apply DDD to a domain (e.g. e-commerce)",TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("strangler-fig",     "Plan a strangler-fig migration",         TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("saga-design",       "Design a distributed saga (orchestration vs choreography)", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("api-gateway",       "Design an API gateway / Backend-for-frontend", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("cqrs-design",       "Apply CQRS to a high-read, low-write system", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("event-sourcing",    "Design event sourcing for an audit-heavy domain", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("context-mapping",   "Map bounded contexts and integrations across a domain", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("observability",     "Design observability for a microservices system", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("fitness-funcs",     "Define fitness functions for a quality attribute (security, scalability, …)", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("service-comms",     "Design service-to-service communication (sync vs async, contracts, versioning)", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("data-ownership",    "Choose a data ownership model (shared DB, DB-per-service, data mesh)", TopicGroup.Exercise, InterviewTrack.Architecture),
     };
 
     public static InterviewTopic? FindById(string id) =>
         All.FirstOrDefault(t => t.Id == id);
 }
 
-public sealed record InterviewTopic(string Id, string DisplayName, TopicGroup Group);
+public sealed record InterviewTopic(string Id, string DisplayName, TopicGroup Group, InterviewTrack Track);
 
 public enum TopicGroup { Concept, Exercise }
+
+public enum InterviewTrack { SystemDesign, Architecture }
+
+/// <summary>
+/// Maps each track to its kernel-plugin name. Used by the interview agents when
+/// constructing user messages so the LLM is told exactly which corpus to search.
+/// Keep these in sync with the <c>PluginName</c> values in <c>appsettings:Corpora[]</c>.
+/// </summary>
+public static class InterviewTrackCorpus
+{
+    public static string CorpusPluginName(InterviewTrack track) => track switch
+    {
+        InterviewTrack.Architecture => "ArchitectureCorpus",
+        InterviewTrack.SystemDesign => "SystemDesignCorpus",
+        _ => "SystemDesignCorpus"
+    };
+}
 
 /// <summary>
 /// Two question formats. <see cref="Discussion"/> is the full multi-turn interview with
@@ -69,6 +112,20 @@ public sealed class InterviewSession
 
     /// <summary>How many questions per batch. Locked when the session starts; "Next batch" reuses this value.</summary>
     public int BatchSize { get; set; } = 5;
+
+    // Running totals across the whole session — accumulated by the use case after every
+    // agent call (interviewer, probe, hint, grader, coach, model-answer, quickcheck).
+    // Null cost means at least one call returned an unknown model price; treat downstream
+    // as "approximate."
+    public int TotalTokensIn { get; set; }
+    public int TotalTokensOut { get; set; }
+    public decimal? TotalCostUsd { get; set; }
+
+    // QuickCheck-only: most recent batch's usage, so the UI can attribute cost per question
+    // when it persists each MCQ as its own EvalRow (cost / batch-size, evenly split).
+    public int LastBatchTokensIn { get; set; }
+    public int LastBatchTokensOut { get; set; }
+    public decimal? LastBatchCostUsd { get; set; }
 
     public InterviewSession(string sessionId, InterviewTopic topic, InterviewMode mode = InterviewMode.Discussion)
     {

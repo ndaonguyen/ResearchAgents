@@ -1,6 +1,17 @@
 # Interview practice mode
 
-A second orchestrator on top of the same multi-agent infrastructure, repurposed as an AI interviewer that grounds questions and feedback in the system-design book corpus. Lives at `/interview` in the web app.
+A second orchestrator on top of the same multi-agent infrastructure, repurposed as an AI interviewer that grounds questions and feedback in your book corpora. Lives at `/interview` in the web app.
+
+## Two tracks, two corpora
+
+Topics are split across two **tracks**, each grounded in a different corpus:
+
+| Track | Topics (examples) | Corpus the agents call |
+|---|---|---|
+| **System Design** | Distributed caching, sharding, consistent hashing, design a URL shortener, design a chat system, … | `SystemDesignCorpus.Search` — ByteByteGo + Alex Xu |
+| **Architecture** | Bounded contexts (DDD), microservices vs monolith, architectural styles, decompose a monolith, strangler-fig migration, distributed sagas, … | `ArchitectureCorpus.Search` — Hard Parts, DDD Distilled, Microservices Patterns, Evolutionary Architectures, Monolith→Microservices, etc. (8 books) |
+
+The dropdown groups topics by **Track → Concepts/Exercises** (four optgroups). Each topic carries a `Track` field; the interview agents (Interviewer, Hint, Grader, ModelAnswer, QuickCheck) read it and target the right corpus tool — so an architecture-track topic will not accidentally search the system-design books, and vice versa.
 
 ## Two modes
 

@@ -18,7 +18,17 @@
 <div class="app">
     <header>
         <h1>Interview practice</h1>
-        <span class="subtitle">System design — grounded in your indexed book corpus</span>
+        <span class="subtitle">System design + Architecture — grounded in your indexed book corpora</span>
+        @if (_session is not null && (_session.TotalTokensIn > 0 || _session.TotalTokensOut > 0))
+        {
+            <span class="session-cost">
+                <span class="session-tokens">@_session.TotalTokensIn.ToString("N0") in / @_session.TotalTokensOut.ToString("N0") out</span>
+                @if (_session.TotalCostUsd is { } cost)
+                {
+                    <span class="session-cost-usd">@cost.ToString("C4", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</span>
+                }
+            </span>
+        }
         @if (_ttsAvailable)
         {
             <button class="mute-toggle" @onclick="ToggleMute" title="@(_muted ? "Unmute" : "Mute")">
@@ -32,14 +42,26 @@
         <section class="topic-picker">
             <label>Topic:</label>
             <select @bind="_selectedTopicId" disabled="@_busy">
-                <optgroup label="Concepts">
-                    @foreach (var t in _topics.Where(x => x.Group == TopicGroup.Concept))
+                <optgroup label="System Design — Concepts">
+                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.SystemDesign && x.Group == TopicGroup.Concept))
                     {
                         <option value="@t.Id">@t.DisplayName</option>
                     }
                 </optgroup>
-                <optgroup label="Design exercises">
-                    @foreach (var t in _topics.Where(x => x.Group == TopicGroup.Exercise))
+                <optgroup label="System Design — Design exercises">
+                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.SystemDesign && x.Group == TopicGroup.Exercise))
+                    {
+                        <option value="@t.Id">@t.DisplayName</option>
+                    }
+                </optgroup>
+                <optgroup label="Architecture — Concepts">
+                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.Architecture && x.Group == TopicGroup.Concept))
+                    {
+                        <option value="@t.Id">@t.DisplayName</option>
+                    }
+                </optgroup>
+                <optgroup label="Architecture — Design exercises">
+                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.Architecture && x.Group == TopicGroup.Exercise))
                     {
                         <option value="@t.Id">@t.DisplayName</option>
                     }
@@ -318,7 +340,12 @@
                     }
                 }
 
-                <button @onclick="ResetSession">Start a new interview</button>
+                <div class="discussion-actions">
+                    <button class="primary" @onclick="NextDiscussionQuestion" disabled="@_busy">
+                        @(_busy ? "Loading…" : "Next question →")
+                    </button>
+                    <button @onclick="ResetSession" disabled="@_busy">Start a new interview</button>
+                </div>
             </section>
         }
     }
@@ -345,8 +372,11 @@
     .batch-size-note { padding-left: 24px; font-size: 0.8rem; color: #94a3b8; font-style: italic; line-height: 1.4; }
     button.primary { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; font-size: 1rem; }
     button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
-    button.mute-toggle { margin-left: auto; padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    button.mute-toggle { padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
     button.mute-toggle:hover { background: #f8fafc; }
+    .session-cost { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.85rem; }
+    .session-tokens { color: #64748b; }
+    .session-cost-usd { background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 
     .transcript { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
     .turn { padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
@@ -398,8 +428,12 @@
     .grade-card .gaps li { color: #b91c1c; }
     .grade-card .coach-summary { font-style: italic; color: #334155; line-height: 1.6; }
     .grade-card .reading li { color: #475569; }
-    .grade-card button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; }
+    .grade-card button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; color: #1e293b; border-radius: 6px; cursor: pointer; }
     .grade-card button:hover { background: #f1f5f9; }
+    .grade-card button.primary { padding: 10px 18px; border: 0; background: #2563eb; color: white; font-weight: 600; font-size: 1rem; }
+    .grade-card button.primary:hover { background: #1d4ed8; }
+    .grade-card button.primary:disabled { background: #94a3b8; }
+    .discussion-actions { display: flex; gap: 12px; margin-top: 18px; }
 
     .mcq { display: flex; flex-direction: column; gap: 16px; }
     .mcq-question { padding: 16px 18px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; }
@@ -457,6 +491,10 @@
     //  binds straight to the session model.
     private int _batchIndex = 0;
     private readonly List<int> _cumulativeScores = new();
+
+    // Discussion: 1-based question counter so each "Next question" persists with a unique
+    // QuestionId ({sessionId}-d{N}) for Past Runs grouping.
+    private int _discussionQuestionIndex = 0;
 
     private int AnsweredCount =>
         _session?.Picks.Count(p => p.Count > 0) ?? 0;
@@ -615,6 +653,7 @@
         _busy = true;
         _runId = RunId.New();
         _batchIndex = _selectedMode == InterviewMode.QuickCheck ? 1 : 0;
+        _discussionQuestionIndex = _selectedMode == InterviewMode.Discussion ? 1 : 0;
         _cumulativeScores.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
@@ -674,6 +713,30 @@
             _busy = false;
             StateHasChanged();
         }
+    }
+
+    private async Task NextDiscussionQuestion()
+    {
+        if (_session is null || _session.Mode != InterviewMode.Discussion) return;
+        _busy = true;
+        _runId = RunId.New();
+        _discussionQuestionIndex++;
+        StartEventSubscription(_runId);
+        StateHasChanged();
+
+        try
+        {
+            await Session.NextDiscussionQuestionAsync(_session, _runId);
+        }
+        finally
+        {
+            _busy = false;
+            _currentAgentMessage = null;
+            StateHasChanged();
+        }
+
+        // Speak the new interviewer question if TTS is enabled.
+        await SpeakLatestInterviewerTurnAsync();
     }
 
     private async Task NextBatch()
@@ -748,6 +811,7 @@
         _sttError = null;
         _currentAgentMessage = null;
         _batchIndex = 0;
+        _discussionQuestionIndex = 0;
         _cumulativeScores.Clear();
         if (_listening && _sttModule is not null)
         {
@@ -800,6 +864,16 @@
         if (_session is null || _session.Mode != InterviewMode.QuickCheck) return;
         if (!_session.BatchSubmitted || _session.Grades is null) return;
 
+        // Split the batch generation cost evenly across each question's row so the Past Runs
+        // viewer shows realistic per-question economics (per-row is the row's share of the
+        // batch). Aggregating these rows back up gives the true batch cost.
+        var n = _session.Questions.Count;
+        var perTokensIn = n > 0 ? _session.LastBatchTokensIn / n : 0;
+        var perTokensOut = n > 0 ? _session.LastBatchTokensOut / n : 0;
+        decimal? perCost = (_session.LastBatchCostUsd is { } total && n > 0)
+            ? total / n
+            : null;
+
         for (var i = 0; i < _session.Questions.Count; i++)
         {
             var q = _session.Questions[i];
@@ -824,9 +898,9 @@
                 Question: questionField,
                 RunId: _runId.Value,
                 Answer: $"Picked: {pickedText}",
-                TokensIn: 0,
-                TokensOut: 0,
-                CostUsd: null,
+                TokensIn: perTokensIn,
+                TokensOut: perTokensOut,
+                CostUsd: perCost,
                 DurationMs: 0,
                 Errored: false,
                 ErrorMessage: null,
@@ -855,15 +929,21 @@
             ? c.Summary + (c.SuggestedReading.Count > 0 ? "\n\nSuggested reading:\n  - " + string.Join("\n  - ", c.SuggestedReading) : "")
             : null;
 
+        // For multi-question Discussion sessions, suffix with -d{N} so each question gets a
+        // unique row; the leading sessionId still correlates them.
+        var questionId = _discussionQuestionIndex > 1
+            ? $"{_session.SessionId}-d{_discussionQuestionIndex}"
+            : _session.SessionId;
+
         var row = new EvalRow(
-            QuestionId: _session.SessionId,
+            QuestionId: questionId,
             Variant: "interview",
             Question: questionField,
             RunId: _runId.Value,
             Answer: answerField,
-            TokensIn: 0,
-            TokensOut: 0,
-            CostUsd: null,
+            TokensIn: _session.TotalTokensIn,
+            TokensOut: _session.TotalTokensOut,
+            CostUsd: _session.TotalCostUsd,
             DurationMs: (long)(DateTime.UtcNow - _session.StartedAtUtc).TotalMilliseconds,
             Errored: false,
             ErrorMessage: null,
