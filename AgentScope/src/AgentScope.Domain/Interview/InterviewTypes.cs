@@ -38,6 +38,14 @@ public static class InterviewTopics
         new InterviewTopic("evolutionary",      "Evolutionary architecture & fitness functions", TopicGroup.Concept, InterviewTrack.Architecture),
         new InterviewTopic("arch-styles",       "Architectural styles (layered, hexagonal, event-driven, microkernel)", TopicGroup.Concept, InterviewTrack.Architecture),
         new InterviewTopic("service-granularity","Service granularity & decomposition",   TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("aggregates",        "Aggregates & transactional boundaries (DDD)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("domain-events",     "Domain events & event modeling",         TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("coupling-cohesion", "Coupling & cohesion (static vs dynamic)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("resilience",        "Resilience patterns (circuit breaker, retry, bulkhead, timeout)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("api-design",        "API design fundamentals (REST vs GraphQL vs gRPC trade-offs)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("arch-quanta",       "Architectural quanta & deployability boundaries", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("adrs",              "Architecture Decision Records (ADRs)",   TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("event-contracts",   "Event contracts & schema evolution",     TopicGroup.Concept,  InterviewTrack.Architecture),
 
         // -------- Architecture — Design exercises --------
         new InterviewTopic("decompose-mono",    "Decompose a monolith into services",     TopicGroup.Exercise, InterviewTrack.Architecture),
