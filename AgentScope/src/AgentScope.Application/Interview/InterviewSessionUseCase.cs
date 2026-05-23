@@ -24,6 +24,7 @@ public sealed class InterviewSessionUseCase
 {
     private const int MaxProbes = 2;
     public const int MaxHints = 2;
+    public const int DefaultQuickCheckBatchSize = 5;
 
     private readonly IInterviewerAgent _interviewer;
     private readonly IProbeAgent _probe;
@@ -116,55 +117,98 @@ public sealed class InterviewSessionUseCase
     }
 
     /// <summary>
-    /// Starts a QuickCheck (MCQ) session. Generates one RAG-grounded multiple-choice
-    /// question, attaches it to a new <see cref="InterviewSession"/> in <see cref="InterviewMode.QuickCheck"/> mode,
-    /// and returns the session. The caller renders the question and posts the picks back
-    /// through <see cref="SubmitQuickCheckAnswerAsync"/>.
+    /// Starts a QuickCheck (MCQ) session and generates the first batch of
+    /// <paramref name="batchSize"/> questions. The size is stored on the session, so
+    /// <see cref="NextQuickCheckBatchAsync"/> reuses it without the caller passing it again.
     /// </summary>
     public async Task<InterviewSession> StartQuickCheckAsync(
-        InterviewTopic topic, RunId runId, CancellationToken ct = default)
+        InterviewTopic topic, RunId runId, int batchSize = DefaultQuickCheckBatchSize, CancellationToken ct = default)
     {
+        batchSize = Math.Clamp(batchSize, 1, 10);
         var session = new InterviewSession(Guid.NewGuid().ToString("N"), topic, InterviewMode.QuickCheck);
-        var (question, _) = await _quickCheck.GenerateAsync(topic, runId, ct);
-        session.Question = question;
+        session.BatchSize = batchSize;
+        var (questions, _) = await _quickCheck.GenerateBatchAsync(topic, batchSize, runId, ct);
+        session.Questions = questions;
+        ResetPicksForBatch(session);
         return session;
     }
 
     /// <summary>
-    /// Generates the next MCQ on the SAME topic, reusing the existing session. Resets
-    /// <see cref="InterviewSession.Question"/>, <see cref="InterviewSession.Result"/>,
-    /// and <see cref="InterviewSession.FinalGrade"/> — but keeps the session ID, so the
-    /// UI can track question-count across a single drilling streak.
+    /// Generates the NEXT batch of MCQs on the same topic, reusing the batch size stored
+    /// on the session. Resets per-question picks and grades; keeps the session ID so
+    /// multi-batch drills stay correlated in Past Runs.
     /// </summary>
-    public async Task NextQuickCheckQuestionAsync(
+    public async Task NextQuickCheckBatchAsync(
         InterviewSession session, RunId runId, CancellationToken ct = default)
     {
         if (session.Mode != InterviewMode.QuickCheck) return;
 
-        var (question, _) = await _quickCheck.GenerateAsync(session.Topic, runId, ct);
-        session.Question = question;
-        session.Result = null;
+        var (questions, _) = await _quickCheck.GenerateBatchAsync(session.Topic, session.BatchSize, runId, ct);
+        session.Questions = questions;
+        session.Grades = null;
+        session.BatchSubmitted = false;
         session.FinalGrade = null;
         session.FinalCoaching = null;
+        ResetPicksForBatch(session);
     }
 
     /// <summary>
-    /// Grades a QuickCheck submission and finalises the session. Score is computed from
-    /// the F1 of <paramref name="selectedIds"/> vs the correct option ids, mapped to 1-5.
-    /// The MCQ's explanation becomes the coaching summary. No grader/coach LLM calls —
-    /// pure deterministic scoring keeps cost trivial for quick checks.
+    /// Grades a whole batch of MCQ answers. <paramref name="picksPerQuestion"/> must be
+    /// parallel-indexed to <see cref="InterviewSession.Questions"/>; missing entries are
+    /// treated as no-pick (score 1 / wrong). Each question gets a 1-5 score (F1 mapped);
+    /// the batch's <see cref="InterviewSession.FinalGrade"/> is the rounded mean.
     /// </summary>
-    public async Task SubmitQuickCheckAnswerAsync(
+    public async Task SubmitQuickCheckBatchAsync(
         InterviewSession session,
-        IReadOnlyList<string> selectedIds,
+        IReadOnlyList<IReadOnlyList<string>> picksPerQuestion,
         RunId runId,
         CancellationToken ct = default)
     {
-        if (session.Question is null) return;
+        if (session.Questions.Count == 0) return;
 
-        var correct = session.Question.Options.Where(o => o.IsCorrect).Select(o => o.Id).ToHashSet();
-        var picked = selectedIds.ToHashSet();
+        var grades = new List<int>(session.Questions.Count);
+        var aggregatedGaps = new List<string>();
+        var aggregatedStrengths = new List<string>();
 
+        for (var i = 0; i < session.Questions.Count; i++)
+        {
+            var q = session.Questions[i];
+            var picks = i < picksPerQuestion.Count ? picksPerQuestion[i].ToHashSet() : new HashSet<string>();
+            var correct = q.Options.Where(o => o.IsCorrect).Select(o => o.Id).ToHashSet();
+
+            var score = ScoreOne(picks, correct);
+            grades.Add(score);
+
+            if (score == 5)
+                aggregatedStrengths.Add($"Q{i + 1}: correct ({string.Join(", ", correct.OrderBy(c => c).Select(c => c.ToUpperInvariant()))}).");
+            else
+                aggregatedGaps.AddRange(BuildGaps(q, correct, picks).Select(g => $"Q{i + 1}: {g}"));
+        }
+
+        session.Grades = grades;
+        session.BatchSubmitted = true;
+
+        var averageScore = (int)Math.Round(grades.Average());
+        session.FinalGrade = new Grade(averageScore, aggregatedStrengths, aggregatedGaps);
+        session.FinalCoaching = new Coaching(
+            Summary: $"Batch average: {grades.Average():F1}/5 across {grades.Count} questions.",
+            SuggestedReading: session.Questions.SelectMany(q => q.Citations).Distinct().ToList());
+
+        await _bus.PublishAsync(new AgentFinishedEvent(
+            runId, AgentId.System, session.FinalCoaching.Summary,
+            TokensIn: 0, TokensOut: 0, EstimatedCostUsd: null,
+            DateTime.UtcNow), ct);
+    }
+
+    private static void ResetPicksForBatch(InterviewSession session)
+    {
+        session.Picks.Clear();
+        for (var i = 0; i < session.Questions.Count; i++)
+            session.Picks.Add(new HashSet<string>());
+    }
+
+    private static int ScoreOne(HashSet<string> picked, HashSet<string> correct)
+    {
         var tp = picked.Intersect(correct).Count();
         var fp = picked.Except(correct).Count();
         var fn = correct.Except(picked).Count();
@@ -173,7 +217,7 @@ public sealed class InterviewSessionUseCase
         var recall = (tp + fn) == 0 ? 0.0 : (double)tp / (tp + fn);
         var f1 = (precision + recall) == 0 ? 0.0 : 2 * precision * recall / (precision + recall);
 
-        var score = f1 switch
+        return f1 switch
         {
             >= 0.95 => 5,
             >= 0.70 => 4,
@@ -181,20 +225,6 @@ public sealed class InterviewSessionUseCase
             >= 0.30 => 2,
             _       => 1
         };
-
-        session.Result = new ChoiceResult(selectedIds, correct.ToList(), score);
-        session.FinalGrade = new Grade(
-            Score: score,
-            Strengths: tp > 0 ? new[] { $"Got {tp} of {correct.Count} correct option(s)." } : Array.Empty<string>(),
-            Gaps: BuildGaps(session.Question, correct, picked));
-        session.FinalCoaching = new Coaching(
-            Summary: session.Question.Explanation,
-            SuggestedReading: session.Question.Citations);
-
-        await _bus.PublishAsync(new AgentFinishedEvent(
-            runId, AgentId.System, session.Question.Explanation,
-            TokensIn: 0, TokensOut: 0, EstimatedCostUsd: null,
-            DateTime.UtcNow), ct);
     }
 
     private static IReadOnlyList<string> BuildGaps(
@@ -208,12 +238,12 @@ public sealed class InterviewSessionUseCase
         foreach (var id in missed)
         {
             var opt = q.Options.FirstOrDefault(o => o.Id == id);
-            if (opt is not null) gaps.Add($"Missed correct option ({id}): {opt.Text}");
+            if (opt is not null) gaps.Add($"missed ({id.ToUpperInvariant()}): {opt.Text}");
         }
         foreach (var id in wrong)
         {
             var opt = q.Options.FirstOrDefault(o => o.Id == id);
-            if (opt is not null) gaps.Add($"Picked incorrect option ({id}): {opt.Text}");
+            if (opt is not null) gaps.Add($"picked wrong ({id.ToUpperInvariant()}): {opt.Text}");
         }
         return gaps;
     }

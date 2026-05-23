@@ -59,99 +59,146 @@
                            checked="@(_selectedMode == InterviewMode.QuickCheck)"
                            @onchange="@(() => _selectedMode = InterviewMode.QuickCheck)"
                            disabled="@_busy" />
-                    Quick check (one multiple-choice question)
+                    Quick check (batch of multiple-choice questions)
                 </label>
             </div>
+
+            @if (_selectedMode == InterviewMode.QuickCheck)
+            {
+                <div class="batch-size-picker">
+                    <span class="batch-size-label">Questions per batch:</span>
+                    @foreach (var (size, costLabel, hint) in BatchSizeOptions)
+                    {
+                        var capturedSize = size;
+                        <label class="batch-size-option">
+                            <input type="radio" name="batchSize" value="@size"
+                                   checked="@(_selectedBatchSize == size)"
+                                   @onchange="@(() => _selectedBatchSize = capturedSize)"
+                                   disabled="@_busy" />
+                            <span class="batch-size-num">@size</span>
+                            <span class="batch-size-cost">@costLabel</span>
+                            <span class="batch-size-hint">@hint</span>
+                        </label>
+                    }
+                </div>
+                <div class="batch-size-note">
+                    Estimated cost per batch on gpt-4o-mini (input + output tokens).
+                    All options round to fractions of a cent — pick on tempo, not budget.
+                </div>
+            }
 
             <button class="primary" @onclick="StartSession" disabled="@_busy">
                 @(_busy ? "Starting…" : "Start interview")
             </button>
         </section>
     }
-    else if (_session.Mode == InterviewMode.QuickCheck && _session.Question is not null)
+    else if (_session.Mode == InterviewMode.QuickCheck && _session.Questions.Count > 0)
     {
-        <section class="mcq">
-            <div class="mcq-question">
-                <div class="speaker">
+        <section class="mcq-batch">
+            <div class="batch-header">
+                <div class="batch-title">
                     Quick check — @_session.Topic.DisplayName
-                    <span class="mcq-counter">Question @_questionIndex@(_questionIndex > 1 ? $" · avg {AverageScore:F1}/5" : "")</span>
+                    <span class="mcq-counter">
+                        Batch @_batchIndex · @_session.Questions.Count question(s)@(_batchIndex > 1 ? $" · cumulative avg {CumulativeAverage:F1}/5" : "")
+                    </span>
                 </div>
-                <div class="text">@_session.Question.Question</div>
-            </div>
-
-            <div class="mcq-options">
-                @foreach (var opt in _session.Question.Options)
+                @if (_session.BatchSubmitted && _session.Grades is { } gs)
                 {
-                    var isSingle = _session.Question.CorrectCount == 1;
-                    var picked = _picked.Contains(opt.Id);
-                    var disabled = _session.Result is not null;
-                    var resultClass = "";
-                    if (_session.Result is not null)
-                    {
-                        if (opt.IsCorrect) resultClass = "correct";
-                        else if (picked) resultClass = "wrong";
-                    }
-                    <label class="mcq-option @(picked ? "picked" : "") @resultClass">
-                        @if (isSingle)
-                        {
-                            <input type="radio" name="mcq" value="@opt.Id"
-                                   checked="@picked"
-                                   @onchange="@(() => SelectSingle(opt.Id))"
-                                   disabled="@disabled" />
-                        }
-                        else
-                        {
-                            <input type="checkbox" value="@opt.Id"
-                                   checked="@picked"
-                                   @onchange="@(() => ToggleMulti(opt.Id))"
-                                   disabled="@disabled" />
-                        }
-                        <span class="opt-id">@opt.Id.ToUpperInvariant().</span>
-                        <span class="opt-text">@opt.Text</span>
-                        @if (_session.Result is not null && opt.IsCorrect)
-                        {
-                            <span class="opt-marker">✓</span>
-                        }
-                        @if (_session.Result is not null && !opt.IsCorrect && picked)
-                        {
-                            <span class="opt-marker wrong">✗</span>
-                        }
-                    </label>
+                    <div class="batch-score">
+                        Batch score:
+                        <span class="score-badge score-@_session.FinalGrade!.Score">@gs.Average().ToString("F1") / 5</span>
+                    </div>
                 }
             </div>
 
-            @if (_session.Result is null)
+            @for (var qi = 0; qi < _session.Questions.Count; qi++)
             {
-                <button class="primary" @onclick="SubmitQuickCheck"
-                        disabled="@(_busy || _picked.Count == 0)">
-                    @(_busy ? "Grading…" : "Submit")
-                </button>
+                var i = qi; // capture for closures
+                var question = _session.Questions[i];
+                var picks = _session.Picks[i];
+                var disabled = _session.BatchSubmitted;
+                var perQuestionGrade = _session.Grades is { } grades && i < grades.Count ? grades[i] : (int?)null;
+                <div class="mcq-card @(perQuestionGrade is null ? "" : (perQuestionGrade == 5 ? "card-correct" : "card-partial"))">
+                    <div class="card-header">
+                        <span class="card-num">Q@(i + 1)</span>
+                        <span class="card-text">@question.Question</span>
+                        @if (perQuestionGrade is { } g)
+                        {
+                            <span class="score-badge score-@g">@g / 5</span>
+                        }
+                    </div>
+
+                    <div class="mcq-options">
+                        @foreach (var opt in question.Options)
+                        {
+                            var isSingle = question.CorrectCount == 1;
+                            var pickedNow = picks.Contains(opt.Id);
+                            var resultClass = "";
+                            if (_session.BatchSubmitted)
+                            {
+                                if (opt.IsCorrect) resultClass = "correct";
+                                else if (pickedNow) resultClass = "wrong";
+                            }
+                            <label class="mcq-option @(pickedNow ? "picked" : "") @resultClass">
+                                @if (isSingle)
+                                {
+                                    <input type="radio" name="@($"mcq-{i}")" value="@opt.Id"
+                                           checked="@pickedNow"
+                                           @onchange="@(() => SelectSingleForQuestion(i, opt.Id))"
+                                           disabled="@disabled" />
+                                }
+                                else
+                                {
+                                    <input type="checkbox" value="@opt.Id"
+                                           checked="@pickedNow"
+                                           @onchange="@(() => ToggleMultiForQuestion(i, opt.Id))"
+                                           disabled="@disabled" />
+                                }
+                                <span class="opt-id">@opt.Id.ToUpperInvariant().</span>
+                                <span class="opt-text">@opt.Text</span>
+                                @if (_session.BatchSubmitted && opt.IsCorrect)
+                                {
+                                    <span class="opt-marker">✓</span>
+                                }
+                                @if (_session.BatchSubmitted && !opt.IsCorrect && pickedNow)
+                                {
+                                    <span class="opt-marker wrong">✗</span>
+                                }
+                            </label>
+                        }
+                    </div>
+
+                    @if (_session.BatchSubmitted)
+                    {
+                        <div class="mcq-explanation">
+                            <div class="exp-label">Explanation</div>
+                            <p>@question.Explanation</p>
+                            @if (question.Citations.Any())
+                            {
+                                <div class="exp-citations">@string.Join(" · ", question.Citations)</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (!_session.BatchSubmitted)
+            {
+                <div class="batch-submit">
+                    <span class="answered-count">@AnsweredCount / @_session.Questions.Count answered</span>
+                    <button class="primary" @onclick="SubmitBatch"
+                            disabled="@(_busy || AnsweredCount == 0)">
+                        @(_busy ? "Grading…" : "Submit batch")
+                    </button>
+                </div>
             }
             else
             {
-                <div class="mcq-result">
-                    <div class="score-row">
-                        <h2>Score</h2>
-                        <div class="score-badge score-@_session.FinalGrade!.Score">@_session.FinalGrade.Score / 5</div>
-                    </div>
-                    <h3>Explanation</h3>
-                    <p>@_session.Question.Explanation</p>
-                    @if (_session.Question.Citations.Any())
-                    {
-                        <h4>Sources</h4>
-                        <ul>
-                            @foreach (var c in _session.Question.Citations)
-                            {
-                                <li>@c</li>
-                            }
-                        </ul>
-                    }
-                    <div class="mcq-actions">
-                        <button class="primary" @onclick="NextQuickCheckQuestion" disabled="@_busy">
-                            @(_busy ? "Loading…" : "Next question →")
-                        </button>
-                        <button @onclick="ResetSession" disabled="@_busy">End session</button>
-                    </div>
+                <div class="batch-actions">
+                    <button class="primary" @onclick="NextBatch" disabled="@_busy">
+                        @(_busy ? "Loading next batch…" : $"Next {_session.BatchSize} question{(_session.BatchSize == 1 ? "" : "s")} →")
+                    </button>
+                    <button @onclick="ResetSession" disabled="@_busy">End session</button>
                 </div>
             }
         </section>
@@ -288,6 +335,14 @@
     .mode-picker { display: flex; flex-direction: column; gap: 8px; }
     .mode-option { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.95rem; }
     .mode-option input { cursor: pointer; }
+    .batch-size-picker { display: flex; flex-direction: column; gap: 6px; padding-left: 24px; }
+    .batch-size-label { font-size: 0.9rem; color: #475569; font-weight: 500; }
+    .batch-size-option { display: grid; grid-template-columns: 20px 28px 90px 1fr; gap: 8px; align-items: center; cursor: pointer; font-size: 0.9rem; padding: 4px 0; }
+    .batch-size-option input { cursor: pointer; margin: 0; }
+    .batch-size-num { font-weight: 600; color: #1e293b; }
+    .batch-size-cost { color: #047857; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.85rem; }
+    .batch-size-hint { color: #94a3b8; font-size: 0.85rem; }
+    .batch-size-note { padding-left: 24px; font-size: 0.8rem; color: #94a3b8; font-style: italic; line-height: 1.4; }
     button.primary { padding: 10px 18px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; font-size: 1rem; }
     button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
     button.mute-toggle { margin-left: auto; padding: 6px 12px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
@@ -368,26 +423,46 @@
     .mcq-result h3 { margin-top: 16px; font-size: 1rem; color: #475569; }
     .mcq-result h4 { margin-top: 12px; font-size: 0.85rem; color: #64748b; }
     .mcq-result p { line-height: 1.6; }
-    .mcq-result button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; border-radius: 6px; cursor: pointer; }
+    .mcq-result button { margin-top: 18px; padding: 8px 14px; border: 1px solid #cbd5e1; background: white; color: #1e293b; border-radius: 6px; cursor: pointer; }
     .mcq-result button:hover { background: #f1f5f9; }
+    .mcq-result button.primary { padding: 10px 18px; border: 0; background: #2563eb; color: white; font-weight: 600; font-size: 1rem; }
+    .mcq-result button.primary:hover { background: #1d4ed8; }
+    .mcq-result button.primary:disabled { background: #94a3b8; }
 </style>
 
 @code {
     private readonly IReadOnlyList<InterviewTopic> _topics = InterviewTopics.All;
     private string _selectedTopicId = "caching";
     private InterviewMode _selectedMode = InterviewMode.Discussion;
+    private int _selectedBatchSize = InterviewSessionUseCase.DefaultQuickCheckBatchSize;
+
+    // Cost labels shown next to each batch-size radio. Estimates are for gpt-4o-mini and
+    // assume ~1-2 corpus searches per batch. Adjust if you change the interview model.
+    private static readonly (int Size, string Cost, string Hint)[] BatchSizeOptions = new[]
+    {
+        (2,  "~$0.0012", "fastest"),
+        (5,  "~$0.0019", "sweet spot · ~2.5× cheaper per question vs singletons"),
+        (10, "~$0.0029", "lowest per-question cost · longer wait per batch")
+    };
 
     private InterviewSession? _session;
     private RunId _runId;
     private string _userInput = "";
     private bool _busy;
 
-    private readonly HashSet<string> _picked = new();
+    // QuickCheck batch state:
+    //  _batchIndex: 1-based batch counter (advances on Next 5).
+    //  _cumulativeScores: per-question scores across ALL submitted batches, for cumulative avg.
+    //  Per-question picks live on _session.Picks (parallel to _session.Questions) so the UI
+    //  binds straight to the session model.
+    private int _batchIndex = 0;
+    private readonly List<int> _cumulativeScores = new();
 
-    // QuickCheck-only: which question number within this run we're on (1-based) and the
-    // running tally of scores so we can show "3 questions, avg 4.3" after the session.
-    private int _questionIndex = 0;
-    private int _totalScore = 0;
+    private int AnsweredCount =>
+        _session?.Picks.Count(p => p.Count > 0) ?? 0;
+
+    private double CumulativeAverage =>
+        _cumulativeScores.Count == 0 ? 0.0 : _cumulativeScores.Average();
 
     private string? _currentAgentMessage;
     private string _currentAgentLabel = "";
@@ -539,16 +614,15 @@
 
         _busy = true;
         _runId = RunId.New();
-        _picked.Clear();
-        _questionIndex = _selectedMode == InterviewMode.QuickCheck ? 1 : 0;
-        _totalScore = 0;
+        _batchIndex = _selectedMode == InterviewMode.QuickCheck ? 1 : 0;
+        _cumulativeScores.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
 
         try
         {
             _session = _selectedMode == InterviewMode.QuickCheck
-                ? await Session.StartQuickCheckAsync(topic, _runId)
+                ? await Session.StartQuickCheckAsync(topic, _runId, _selectedBatchSize)
                 : await Session.StartAsync(topic, _runId);
         }
         finally
@@ -558,7 +632,7 @@
             StateHasChanged();
         }
 
-        // QuickCheck doesn't have an interviewer-spoken turn (the question is on-screen);
+        // QuickCheck doesn't have an interviewer-spoken turn (questions are on-screen);
         // Discussion mode does.
         if (_session?.Mode == InterviewMode.Discussion)
         {
@@ -566,20 +640,34 @@
         }
     }
 
-    private async Task NextQuickCheckQuestion()
+    private void SelectSingleForQuestion(int questionIndex, string optionId)
     {
-        if (_session is null || _session.Mode != InterviewMode.QuickCheck) return;
+        if (_session is null || questionIndex >= _session.Picks.Count) return;
+        _session.Picks[questionIndex].Clear();
+        _session.Picks[questionIndex].Add(optionId);
+    }
 
+    private void ToggleMultiForQuestion(int questionIndex, string optionId)
+    {
+        if (_session is null || questionIndex >= _session.Picks.Count) return;
+        var set = _session.Picks[questionIndex];
+        if (!set.Add(optionId)) set.Remove(optionId);
+    }
+
+    private async Task SubmitBatch()
+    {
+        if (_session is null || _session.Questions.Count == 0) return;
         _busy = true;
-        _picked.Clear();
-        _runId = RunId.New();
-        _questionIndex++;
-        StartEventSubscription(_runId);
         StateHasChanged();
 
         try
         {
-            await Session.NextQuickCheckQuestionAsync(_session, _runId);
+            var picks = _session.Picks
+                .Select(s => (IReadOnlyList<string>)s.ToList())
+                .ToList();
+            await Session.SubmitQuickCheckBatchAsync(_session, picks, _runId);
+            if (_session.Grades is { } gs) _cumulativeScores.AddRange(gs);
+            await PersistBatchAsync();
         }
         finally
         {
@@ -588,31 +676,18 @@
         }
     }
 
-    private double AverageScore => _questionIndex <= 1 ? 0.0 : (double)_totalScore / Math.Max(1, _questionIndex - 1);
-
-    private void SelectSingle(string optionId)
+    private async Task NextBatch()
     {
-        _picked.Clear();
-        _picked.Add(optionId);
-    }
-
-    private void ToggleMulti(string optionId)
-    {
-        if (!_picked.Add(optionId)) _picked.Remove(optionId);
-    }
-
-    private async Task SubmitQuickCheck()
-    {
-        if (_session is null || _session.Question is null || _picked.Count == 0) return;
-
+        if (_session is null || _session.Mode != InterviewMode.QuickCheck) return;
         _busy = true;
+        _runId = RunId.New();
+        _batchIndex++;
+        StartEventSubscription(_runId);
         StateHasChanged();
 
         try
         {
-            await Session.SubmitQuickCheckAnswerAsync(_session, _picked.ToList(), _runId);
-            if (_session.FinalGrade is { } g) _totalScore += g.Score;
-            await PersistSessionAsync();
+            await Session.NextQuickCheckBatchAsync(_session, _runId);
         }
         finally
         {
@@ -672,9 +747,8 @@
         _interimTranscript = "";
         _sttError = null;
         _currentAgentMessage = null;
-        _picked.Clear();
-        _questionIndex = 0;
-        _totalScore = 0;
+        _batchIndex = 0;
+        _cumulativeScores.Clear();
         if (_listening && _sttModule is not null)
         {
             try { await _sttModule.InvokeVoidAsync("stopListening"); } catch { }
@@ -721,47 +795,69 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task PersistBatchAsync()
+    {
+        if (_session is null || _session.Mode != InterviewMode.QuickCheck) return;
+        if (!_session.BatchSubmitted || _session.Grades is null) return;
+
+        for (var i = 0; i < _session.Questions.Count; i++)
+        {
+            var q = _session.Questions[i];
+            var picks = _session.Picks[i];
+            var grade = _session.Grades[i];
+
+            var optionsText = string.Join("\n", q.Options.Select(o =>
+                $"  ({o.Id.ToUpperInvariant()}) {o.Text}{(o.IsCorrect ? "  [correct]" : "")}"));
+            var questionField = $"[{_session.Topic.DisplayName}] Batch {_batchIndex} Q{i + 1}: {q.Question}\n{optionsText}";
+            var pickedText = picks.Count == 0
+                ? "(no selection)"
+                : string.Join(", ", picks.Select(id => id.ToUpperInvariant()));
+
+            var coaching = q.Explanation +
+                (q.Citations.Count > 0
+                    ? "\n\nSources:\n  - " + string.Join("\n  - ", q.Citations)
+                    : "");
+
+            var row = new EvalRow(
+                QuestionId: $"{_session.SessionId}-b{_batchIndex}-q{i + 1}",
+                Variant: "interview-quickcheck",
+                Question: questionField,
+                RunId: _runId.Value,
+                Answer: $"Picked: {pickedText}",
+                TokensIn: 0,
+                TokensOut: 0,
+                CostUsd: null,
+                DurationMs: 0,
+                Errored: false,
+                ErrorMessage: null,
+                JudgeScore: grade,
+                JudgeReasoning: coaching,
+                JudgeTokensIn: 0,
+                JudgeTokensOut: 0,
+                JudgeCostUsd: null,
+                CompletedAt: DateTime.UtcNow);
+
+            await Persister.PersistAsync(row);
+        }
+    }
+
     private async Task PersistSessionAsync()
     {
         if (_session?.FinalGrade is null) return;
+        if (_session.Mode == InterviewMode.QuickCheck) { await PersistBatchAsync(); return; }
 
-        string variant;
-        string questionField;
-        string answerField;
-
-        if (_session.Mode == InterviewMode.QuickCheck && _session.Question is not null)
-        {
-            variant = "interview-quickcheck";
-            var optionsText = string.Join("\n", _session.Question.Options.Select(o =>
-                $"  ({o.Id.ToUpperInvariant()}) {o.Text}{(o.IsCorrect ? "  [correct]" : "")}"));
-            questionField = $"[{_session.Topic.DisplayName}] Q{_questionIndex}: {_session.Question.Question}\n{optionsText}";
-
-            var picked = _session.Result?.SelectedIds is { } sel
-                ? string.Join(", ", sel.Select(id => id.ToUpperInvariant()))
-                : "(no selection)";
-            answerField = $"Picked: {picked}";
-        }
-        else
-        {
-            variant = "interview";
-            questionField = $"[{_session.Topic.DisplayName}] {_session.Transcript.FirstOrDefault()?.Text ?? ""}";
-            answerField = string.Join("\n\n",
-                _session.Transcript.Select(t => $"[{t.Speaker}] {t.Text}"));
-        }
+        // Discussion mode: one row per session, full transcript in Answer.
+        var questionField = $"[{_session.Topic.DisplayName}] {_session.Transcript.FirstOrDefault()?.Text ?? ""}";
+        var answerField = string.Join("\n\n",
+            _session.Transcript.Select(t => $"[{t.Speaker}] {t.Text}"));
 
         var coaching = _session.FinalCoaching is { } c
             ? c.Summary + (c.SuggestedReading.Count > 0 ? "\n\nSuggested reading:\n  - " + string.Join("\n  - ", c.SuggestedReading) : "")
             : null;
 
-        // For QuickCheck multi-question sessions, give each question a unique id so the
-        // Past Runs viewer doesn't collapse them. Discussion sessions are one row per session.
-        var questionId = _session.Mode == InterviewMode.QuickCheck
-            ? $"{_session.SessionId}-q{_questionIndex}"
-            : _session.SessionId;
-
         var row = new EvalRow(
-            QuestionId: questionId,
-            Variant: variant,
+            QuestionId: _session.SessionId,
+            Variant: "interview",
             Question: questionField,
             RunId: _runId.Value,
             Answer: answerField,

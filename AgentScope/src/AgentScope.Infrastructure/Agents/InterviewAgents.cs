@@ -412,31 +412,38 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
 public sealed class QuickCheckAgent : IQuickCheckAgent
 {
     private const string SystemPrompt = """
-        You generate ONE multiple-choice question on the given system-design topic for a
-        quick concept check.
+        You generate a BATCH of multiple-choice questions on the given system-design topic
+        for a quick concept check.
 
         Rules:
-        - Use SystemDesignCorpus.Search to find what the books actually cover on this topic,
-          and pin the question to a real concept (not vague trivia).
-        - 4 options. Mix concrete facts with plausible-but-wrong distractors.
-        - Correct count is 1 OR more — pick what's appropriate for the concept. Some questions
-          are clean single-answer (e.g. "Which is the *primary* purpose of consistent hashing?"),
-          others are "select all that apply" (e.g. "Which of the following are properties of X?").
-        - The Explanation must justify the correct answers AND briefly say why the wrong ones
-          are wrong. Cite book + page range inline.
+        - The N questions must each cover a DISTINCT angle of the topic. Do not repeat the
+          same concept across questions.
+        - Use SystemDesignCorpus.Search to ground each question in what the books actually
+          cover. Different questions can cite different chunks.
+        - 4 options per question. Mix concrete facts with plausible-but-wrong distractors.
+        - Correct count per question is 1 OR more — pick what's appropriate. Some questions
+          are clean single-answer ("Which is the PRIMARY purpose of consistent hashing?"),
+          others are "select all that apply".
+        - Each Explanation must justify the correct answers AND briefly say why the wrong
+          ones are wrong, citing the book + page range.
         - Output JSON only:
           {
-            "question": "<question text, include '(Select all that apply.)' if multi-correct>",
-            "options": [
-              {"id": "a", "text": "<option text>", "correct": true|false},
-              {"id": "b", "text": "<option text>", "correct": true|false},
-              {"id": "c", "text": "<option text>", "correct": true|false},
-              {"id": "d", "text": "<option text>", "correct": true|false}
-            ],
-            "explanation": "<2-3 sentences justifying correct + dismissing wrong, with citation>",
-            "citations": ["<Book Name, pp. X-Y>"]
+            "questions": [
+              {
+                "question": "<question text, include '(Select all that apply.)' if multi-correct>",
+                "options": [
+                  {"id": "a", "text": "<option text>", "correct": true|false},
+                  {"id": "b", "text": "<option text>", "correct": true|false},
+                  {"id": "c", "text": "<option text>", "correct": true|false},
+                  {"id": "d", "text": "<option text>", "correct": true|false}
+                ],
+                "explanation": "<2-3 sentences justifying correct + dismissing wrong, with citation>",
+                "citations": ["<Book Name, pp. X-Y>"]
+              },
+              ... (N total)
+            ]
           }
-        - At least one option must be correct. No commentary outside the JSON.
+        - At least one option per question must be correct. No commentary outside the JSON.
         """;
 
     private readonly IAgentEventBus _bus;
@@ -462,9 +469,12 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
         _logger = logger;
     }
 
-    public async Task<(MultipleChoiceQuestion Question, AgentUsage Usage)> GenerateAsync(
-        InterviewTopic topic, RunId runId, CancellationToken ct = default)
+    public async Task<(IReadOnlyList<MultipleChoiceQuestion> Questions, AgentUsage Usage)> GenerateBatchAsync(
+        InterviewTopic topic, int count, RunId runId, CancellationToken ct = default)
     {
+        if (count < 1) count = 1;
+        if (count > 10) count = 10;
+
         var agentId = AgentId.QuickCheck;
         using var _ = _runContext.Push(runId, agentId);
 
@@ -482,7 +492,8 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
         };
 
         var userMessage = new ChatMessageContent(AuthorRole.User,
-            $"Topic: {topic.DisplayName}\n\nGenerate one MCQ on this topic.");
+            $"Topic: {topic.DisplayName}\n\nGenerate {count} distinct MCQs on this topic. " +
+            "Make sure each covers a different angle.");
 
         var sb = new StringBuilder();
         IReadOnlyDictionary<string, object?>? lastMetadata = null;
@@ -498,68 +509,76 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
         }
 
         var json = sb.ToString();
-        var question = ParseQuestion(json);
+        var questions = ParseBatch(json);
         var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
                     ?? new AgentUsage(0, 0, null);
 
         await _bus.PublishAsync(new AgentFinishedEvent(
-            runId, agentId, question.Question, usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
+            runId, agentId, $"{questions.Count} questions generated",
+            usage.TokensIn, usage.TokensOut, usage.CostUsd, DateTime.UtcNow), ct);
 
-        return (question, usage);
+        return (questions, usage);
     }
 
-    internal static MultipleChoiceQuestion ParseQuestion(string json)
+    internal static IReadOnlyList<MultipleChoiceQuestion> ParseBatch(string json)
     {
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            if (!doc.RootElement.TryGetProperty("questions", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return Array.Empty<MultipleChoiceQuestion>();
 
-            var question = root.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String
-                ? q.GetString() ?? ""
-                : "(question text missing)";
-
-            var options = new List<MultipleChoiceOption>();
-            if (root.TryGetProperty("options", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            var list = new List<MultipleChoiceQuestion>(arr.GetArrayLength());
+            foreach (var qEl in arr.EnumerateArray())
             {
-                foreach (var item in arr.EnumerateArray())
-                {
-                    if (item.ValueKind != JsonValueKind.Object) continue;
-                    var id = item.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
-                        ? idEl.GetString() ?? ""
-                        : Guid.NewGuid().ToString("N")[..1];
-                    var text = item.TryGetProperty("text", out var tEl) && tEl.ValueKind == JsonValueKind.String
-                        ? tEl.GetString() ?? ""
-                        : "";
-                    var correct = item.TryGetProperty("correct", out var cEl) && cEl.ValueKind == JsonValueKind.True;
-                    if (!string.IsNullOrWhiteSpace(text))
-                        options.Add(new MultipleChoiceOption(id, text, correct));
-                }
+                if (qEl.ValueKind != JsonValueKind.Object) continue;
+                var parsed = ParseQuestion(qEl);
+                if (parsed.Options.Count > 0) list.Add(parsed);
             }
-
-            var explanation = root.TryGetProperty("explanation", out var e) && e.ValueKind == JsonValueKind.String
-                ? e.GetString() ?? ""
-                : "";
-
-            var citations = ReadStringArray(root, "citations");
-
-            // Safety: if the agent forgot to mark any option correct, mark the first one so
-            // the user can at least see a result instead of a stuck UI.
-            if (options.Count > 0 && options.All(o => !o.IsCorrect))
-            {
-                options[0] = options[0] with { IsCorrect = true };
-            }
-
-            return new MultipleChoiceQuestion(question, options, explanation, citations);
+            return list;
         }
         catch (JsonException)
         {
-            return new MultipleChoiceQuestion(
-                "Quick-check output was not valid JSON.",
-                Array.Empty<MultipleChoiceOption>(),
-                "",
-                Array.Empty<string>());
+            return Array.Empty<MultipleChoiceQuestion>();
         }
+    }
+
+    private static MultipleChoiceQuestion ParseQuestion(JsonElement root)
+    {
+        var question = root.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String
+            ? q.GetString() ?? ""
+            : "(question text missing)";
+
+        var options = new List<MultipleChoiceOption>();
+        if (root.TryGetProperty("options", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                var id = item.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                    ? idEl.GetString() ?? ""
+                    : Guid.NewGuid().ToString("N")[..1];
+                var text = item.TryGetProperty("text", out var tEl) && tEl.ValueKind == JsonValueKind.String
+                    ? tEl.GetString() ?? ""
+                    : "";
+                var correct = item.TryGetProperty("correct", out var cEl) && cEl.ValueKind == JsonValueKind.True;
+                if (!string.IsNullOrWhiteSpace(text))
+                    options.Add(new MultipleChoiceOption(id, text, correct));
+            }
+        }
+
+        var explanation = root.TryGetProperty("explanation", out var e) && e.ValueKind == JsonValueKind.String
+            ? e.GetString() ?? ""
+            : "";
+
+        var citations = ReadStringArray(root, "citations");
+
+        if (options.Count > 0 && options.All(o => !o.IsCorrect))
+        {
+            options[0] = options[0] with { IsCorrect = true };
+        }
+
+        return new MultipleChoiceQuestion(question, options, explanation, citations);
     }
 
     private static IReadOnlyList<string> ReadStringArray(JsonElement root, string name)

@@ -83,17 +83,19 @@ When you're stuck, click **💡 Hint** to get a small nudge.
 
 ## Quick-check (MCQ) mode
 
-Pick **Quick check** on the start screen to drill a topic with multiple-choice questions.
+Pick **Quick check** on the start screen to drill a topic with **batches of 5 multiple-choice questions**.
 
-- The `QuickCheckAgent` generates one MCQ at a time, grounded in the system-design corpus — 4 options, with 1 OR multiple marked correct (the agent decides what's appropriate per question). Single-correct renders as radios; multi-correct as checkboxes.
-- Submit → grading is **deterministic** (F1 score over picked vs correct option ids, mapped to 1-5). No LLM call for grading, so this mode is cheap and instant.
-- Results panel reveals which options were correct (green ✓), which of your picks were wrong (red ✗), the explanation, and the book citations.
-- **Drill on the same topic** with the **Next question →** button — generates a fresh MCQ on the same topic without leaving the session. The header shows your question number and running average score (e.g. *"Question 4 · avg 4.2/5"*) once you have more than one question in the session.
-- Hit **End session** when you're done to go back to the topic picker.
-- Discussion-only features (hints, probes, show-answer button) don't apply in quick-check — the question is short and the answer is multiple-choice; either you know it or you don't.
-- Persistence: each MCQ becomes its own row in `ui-{yyyyMMdd}.jsonl` with `Variant = "interview-quickcheck"`. Multi-question sessions get unique `QuestionId`s of the shape `{sessionId}-q{n}` so the Past Runs viewer doesn't collapse them. Group rows by the leading `sessionId` to reconstruct a single drilling session.
+- The `QuickCheckAgent` generates a batch of 5 distinct MCQs in **one LLM call**, grounded in the system-design corpus. The prompt explicitly requires each question to cover a different angle, so you're not just answering the same concept 5 ways.
+- Each card: 4 options, with 1 OR multiple correct (per-question). Single-correct renders as radios; multi-correct as checkboxes.
+- Answer as many as you want — empty picks score lowest. Click **Submit batch** to grade all five at once.
+- Grading is **deterministic** (F1 score per question mapped to 1-5). Zero LLM calls — instant + free.
+- After submit: each card shows per-question score, ✓ on correct options, ✗ on your wrong picks, and the inline explanation with citations. A batch summary at the top shows the average.
+- **Drill on the same topic** by clicking **Next 5 questions →** — generates a fresh batch on the same topic. The header tracks batch number and your **cumulative average** across all batches in this session (e.g. *"Batch 3 · 5 questions · cumulative avg 4.2/5"*).
+- Hit **End session** to go back to the topic picker.
+- Discussion-only features (hints, probes, show-answer button) don't apply here — quick-check is meant to be fast.
+- Persistence: each question in each batch becomes its own row in `ui-{yyyyMMdd}.jsonl` with `Variant = "interview-quickcheck"`. `QuestionId` shape is `{sessionId}-b{batch}-q{n}`, so you can group by `sessionId` for a whole drilling streak or by `sessionId-b{batch}` for one batch.
 
-**When to use quick-check vs discussion:** drill quick-check on a topic until your running average stabilises at 4-5 — that's your concept recall locked in. Then run a discussion session on the same topic to test whether you can apply it under pressure. The MCQ is the warmup; the discussion is the rep.
+**When to use quick-check vs discussion:** drill quick-check batches on a topic until your cumulative average stabilises at 4-5 — concept recall locked in. Then run a discussion session on the same topic to test whether you can apply it under pressure. MCQ batches are the warmup reps; the discussion is the headline lift.
 
 ## Show answer (give up)
 

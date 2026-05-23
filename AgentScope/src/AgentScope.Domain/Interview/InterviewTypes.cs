@@ -60,9 +60,15 @@ public sealed class InterviewSession
     public Grade? FinalGrade { get; set; }
     public Coaching? FinalCoaching { get; set; }
 
-    // QuickCheck-only.
-    public MultipleChoiceQuestion? Question { get; set; }
-    public ChoiceResult? Result { get; set; }
+    // QuickCheck-only: a batch of MCQs and the user's per-question picks + grading outcomes.
+    // Indexes are parallel: Questions[i] ↔ Picks[i] ↔ Grades[i] (Grades is null until BatchSubmitted).
+    public IReadOnlyList<MultipleChoiceQuestion> Questions { get; set; } = Array.Empty<MultipleChoiceQuestion>();
+    public List<HashSet<string>> Picks { get; } = new();
+    public List<int>? Grades { get; set; }
+    public bool BatchSubmitted { get; set; }
+
+    /// <summary>How many questions per batch. Locked when the session starts; "Next batch" reuses this value.</summary>
+    public int BatchSize { get; set; } = 5;
 
     public InterviewSession(string sessionId, InterviewTopic topic, InterviewMode mode = InterviewMode.Discussion)
     {

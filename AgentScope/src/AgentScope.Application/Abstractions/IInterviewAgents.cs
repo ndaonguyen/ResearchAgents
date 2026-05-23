@@ -50,15 +50,16 @@ public interface IModelAnswerAgent
 }
 
 /// <summary>
-/// Generates a single multiple-choice question for "quick check" mode. The agent uses
-/// the system-design corpus to pick a concept that's actually covered, generates 4-5
-/// plausible options, marks which are correct (one OR multiple), and writes an
-/// explanation citing the source chunks.
+/// Generates a BATCH of multiple-choice questions for "quick check" mode. The agent uses
+/// the system-design corpus to pick concepts that are actually covered, generates 4
+/// plausible options per question (with 1 OR more marked correct), and writes an
+/// explanation citing the source chunks. The prompt requires the N questions to cover
+/// DISTINCT angles of the topic.
 /// </summary>
 public interface IQuickCheckAgent
 {
-    Task<(MultipleChoiceQuestion Question, AgentUsage Usage)> GenerateAsync(
-        InterviewTopic topic, RunId runId, CancellationToken ct = default);
+    Task<(IReadOnlyList<MultipleChoiceQuestion> Questions, AgentUsage Usage)> GenerateBatchAsync(
+        InterviewTopic topic, int count, RunId runId, CancellationToken ct = default);
 }
 
 /// <summary>
