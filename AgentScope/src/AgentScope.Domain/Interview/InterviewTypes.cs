@@ -60,6 +60,55 @@ public static class InterviewTopics
         new InterviewTopic("fitness-funcs",     "Define fitness functions for a quality attribute (security, scalability, …)", TopicGroup.Exercise, InterviewTrack.Architecture),
         new InterviewTopic("service-comms",     "Design service-to-service communication (sync vs async, contracts, versioning)", TopicGroup.Exercise, InterviewTrack.Architecture),
         new InterviewTopic("data-ownership",    "Choose a data ownership model (shared DB, DB-per-service, data mesh)", TopicGroup.Exercise, InterviewTrack.Architecture),
+
+        // -------- AI Engineering — Concepts (Huyen) --------
+        new InterviewTopic("prompt-eng",        "Prompt engineering fundamentals (zero-shot, few-shot, CoT)", TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("rag-design",        "RAG system design (chunking, retrieval, re-ranking)", TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("llm-eval",          "LLM evaluation strategies (golden sets, LLM-as-judge, A/B)", TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("embeddings",        "Embeddings & vector databases",            TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("inference-cost",    "Inference cost & latency optimisation",    TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("ft-vs-prompt",      "Fine-tuning vs prompting vs RAG — trade-offs", TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("hallucination",     "Hallucination causes & mitigation",        TopicGroup.Concept, InterviewTrack.AiEngineering),
+        new InterviewTopic("guardrails",        "Guardrails, safety, and content filtering",TopicGroup.Concept, InterviewTrack.AiEngineering),
+
+        // -------- AI Engineering — Design exercises --------
+        new InterviewTopic("design-copilot",    "Design an AI customer-support copilot",    TopicGroup.Exercise, InterviewTrack.AiEngineering),
+        new InterviewTopic("design-rag",        "Design a RAG system over internal docs",   TopicGroup.Exercise, InterviewTrack.AiEngineering),
+        new InterviewTopic("data-flywheel",     "Build a feedback / data flywheel for an LLM product", TopicGroup.Exercise, InterviewTrack.AiEngineering),
+        new InterviewTopic("eval-framework",    "Design an LLM eval framework for production", TopicGroup.Exercise, InterviewTrack.AiEngineering),
+        new InterviewTopic("cost-optimize",     "Cost-optimise an LLM-heavy system (caching, routing, batching)", TopicGroup.Exercise, InterviewTrack.AiEngineering),
+
+        // -------- Testing — Concepts (Khorikov) --------
+        new InterviewTopic("test-pyramid",      "Test pyramid & boundaries (unit / integration / e2e)", TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("test-doubles",      "Test doubles (mock, stub, spy, fake) — when to use which", TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("test-schools",      "London vs Detroit (Chicago) school of TDD", TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("four-pillars",      "What makes a test valuable (Khorikov's 4 pillars)", TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("testability",       "Designing for testability",                TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("test-smells",       "Test smells (brittle, slow, opaque, flaky)", TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("mutation-testing",  "Mutation testing",                         TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("property-based",    "Property-based testing",                   TopicGroup.Concept, InterviewTrack.Testing),
+
+        // -------- Testing — Design exercises --------
+        new InterviewTopic("make-testable",     "Make a hard-to-test class testable",       TopicGroup.Exercise, InterviewTrack.Testing),
+        new InterviewTopic("mocking-strategy",  "Choose a mocking strategy for a service-with-many-deps", TopicGroup.Exercise, InterviewTrack.Testing),
+        new InterviewTopic("test-plan",         "Design a test plan for a new feature",     TopicGroup.Exercise, InterviewTrack.Testing),
+        new InterviewTopic("integration-strategy","Plan an integration-test strategy for a microservices system", TopicGroup.Exercise, InterviewTrack.Testing),
+
+        // -------- Code Craft — Concepts (Good Code/Bad Code + FP in C#) --------
+        new InterviewTopic("module-api",        "Module / API design at code level",        TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("encapsulation",     "Encapsulation & abstraction levels",       TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("error-handling",    "Error handling strategies (exceptions, results, monads)", TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("naming",            "Naming & code clarity",                    TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("defensive-decl",    "Defensive vs declarative programming",     TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("immutability",      "Immutability & pure functions",            TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("composition",       "Composition over inheritance",             TopicGroup.Concept, InterviewTrack.CodeCraft),
+        new InterviewTopic("code-smells",       "Code smells",                              TopicGroup.Concept, InterviewTrack.CodeCraft),
+
+        // -------- Code Craft — Design exercises --------
+        new InterviewTopic("refactor-coupled",  "Refactor a deeply-coupled class",          TopicGroup.Exercise, InterviewTrack.CodeCraft),
+        new InterviewTopic("error-strategy",    "Design an error-handling strategy for a public API", TopicGroup.Exercise, InterviewTrack.CodeCraft),
+        new InterviewTopic("functional-pipeline","Refactor imperative code into a functional pipeline", TopicGroup.Exercise, InterviewTrack.CodeCraft),
+        new InterviewTopic("value-objects",     "Design a value-object library for a domain", TopicGroup.Exercise, InterviewTrack.CodeCraft),
     };
 
     public static InterviewTopic? FindById(string id) =>
@@ -70,7 +119,7 @@ public sealed record InterviewTopic(string Id, string DisplayName, TopicGroup Gr
 
 public enum TopicGroup { Concept, Exercise }
 
-public enum InterviewTrack { SystemDesign, Architecture }
+public enum InterviewTrack { SystemDesign, Architecture, AiEngineering, Testing, CodeCraft }
 
 /// <summary>
 /// Maps each track to its kernel-plugin name. Used by the interview agents when
@@ -81,9 +130,22 @@ public static class InterviewTrackCorpus
 {
     public static string CorpusPluginName(InterviewTrack track) => track switch
     {
-        InterviewTrack.Architecture => "ArchitectureCorpus",
-        InterviewTrack.SystemDesign => "SystemDesignCorpus",
+        InterviewTrack.Architecture   => "ArchitectureCorpus",
+        InterviewTrack.SystemDesign   => "SystemDesignCorpus",
+        InterviewTrack.AiEngineering  => "AiEngineeringCorpus",
+        InterviewTrack.Testing        => "TestingCorpus",
+        InterviewTrack.CodeCraft      => "CodeCraftCorpus",
         _ => "SystemDesignCorpus"
+    };
+
+    public static string DisplayName(InterviewTrack track) => track switch
+    {
+        InterviewTrack.SystemDesign   => "System Design",
+        InterviewTrack.Architecture   => "Architecture",
+        InterviewTrack.AiEngineering  => "AI Engineering",
+        InterviewTrack.Testing        => "Testing",
+        InterviewTrack.CodeCraft      => "Code Craft",
+        _ => track.ToString()
     };
 }
 

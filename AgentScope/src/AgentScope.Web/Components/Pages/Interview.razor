@@ -42,30 +42,21 @@
         <section class="topic-picker">
             <label>Topic:</label>
             <select @bind="_selectedTopicId" disabled="@_busy">
-                <optgroup label="System Design — Concepts">
-                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.SystemDesign && x.Group == TopicGroup.Concept))
+                @foreach (var track in Enum.GetValues<InterviewTrack>())
+                {
+                    foreach (var group in new[] { TopicGroup.Concept, TopicGroup.Exercise })
                     {
-                        <option value="@t.Id">@t.DisplayName</option>
+                        var topics = _topics.Where(x => x.Track == track && x.Group == group).ToList();
+                        if (topics.Count == 0) continue;
+                        var label = $"{InterviewTrackCorpus.DisplayName(track)} — {(group == TopicGroup.Concept ? "Concepts" : "Design exercises")}";
+                        <optgroup label="@label">
+                            @foreach (var t in topics)
+                            {
+                                <option value="@t.Id">@t.DisplayName</option>
+                            }
+                        </optgroup>
                     }
-                </optgroup>
-                <optgroup label="System Design — Design exercises">
-                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.SystemDesign && x.Group == TopicGroup.Exercise))
-                    {
-                        <option value="@t.Id">@t.DisplayName</option>
-                    }
-                </optgroup>
-                <optgroup label="Architecture — Concepts">
-                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.Architecture && x.Group == TopicGroup.Concept))
-                    {
-                        <option value="@t.Id">@t.DisplayName</option>
-                    }
-                </optgroup>
-                <optgroup label="Architecture — Design exercises">
-                    @foreach (var t in _topics.Where(x => x.Track == InterviewTrack.Architecture && x.Group == TopicGroup.Exercise))
-                    {
-                        <option value="@t.Id">@t.DisplayName</option>
-                    }
-                </optgroup>
+                }
             </select>
 
             <div class="mode-picker">

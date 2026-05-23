@@ -2,16 +2,19 @@
 
 A second orchestrator on top of the same multi-agent infrastructure, repurposed as an AI interviewer that grounds questions and feedback in your book corpora. Lives at `/interview` in the web app.
 
-## Two tracks, two corpora
+## Five tracks, five corpora
 
-Topics are split across two **tracks**, each grounded in a different corpus:
+Topics are split across five **tracks**, each grounded in its own corpus:
 
-| Track | Topics (examples) | Corpus the agents call |
+| Track | Topics (examples) | Corpus & books |
 |---|---|---|
-| **System Design** | Distributed caching, sharding, consistent hashing, design a URL shortener, design a chat system, … | `SystemDesignCorpus.Search` — ByteByteGo + Alex Xu |
-| **Architecture** | Bounded contexts (DDD), microservices vs monolith, architectural styles, decompose a monolith, strangler-fig migration, distributed sagas, … | `ArchitectureCorpus.Search` — Hard Parts, DDD Distilled, Microservices Patterns, Evolutionary Architectures, Monolith→Microservices, etc. (8 books) |
+| **System Design** | Distributed caching, sharding, consistent hashing, design a URL shortener, design a chat system, … | `SystemDesignCorpus.Search` — ByteByteGo + Alex Xu (2 books) |
+| **Architecture** | Bounded contexts (DDD), aggregates, micro-vs-mono, architectural styles, decompose a monolith, strangler-fig migration, distributed sagas, CQRS, … | `ArchitectureCorpus.Search` — Hard Parts, DDD Distilled, Implementing DDD, Microservices Patterns, Software Architecture Patterns, Evolutionary Architectures, Event-Driven Microservices, Event-Driven Data Mesh, Monolith→Microservices, Enabling Microservice Success (10 books) |
+| **AI Engineering** | Prompt engineering, RAG design, LLM evaluation, embeddings, inference cost optimisation, hallucination mitigation, design a copilot, design an LLM eval framework, … | `AiEngineeringCorpus.Search` — AI Engineering by Chip Huyen (1 book) |
+| **Testing** | Test pyramid, test doubles, London vs Detroit school, Khorikov's 4 pillars, designing for testability, mutation testing, test plan for a feature, … | `TestingCorpus.Search` — Unit Testing Principles, Practices, and Patterns by Khorikov (1 book) |
+| **Code Craft** | Module/API design at code level, encapsulation, error handling, immutability, composition over inheritance, refactor a coupled class, design a value-object library, … | `CodeCraftCorpus.Search` — Good Code/Bad Code + Functional Programming in C# (2 books) |
 
-The dropdown groups topics by **Track → Concepts/Exercises** (four optgroups). Each topic carries a `Track` field; the interview agents (Interviewer, Hint, Grader, ModelAnswer, QuickCheck) read it and target the right corpus tool — so an architecture-track topic will not accidentally search the system-design books, and vice versa.
+The dropdown groups topics by **Track → Concepts/Exercises** (rendered dynamically — empty groups are skipped). Each topic carries a `Track` field; the interview agents (Interviewer, Hint, Grader, ModelAnswer, QuickCheck) read it and target the right corpus tool, so cross-corpus pollution is impossible.
 
 ## Two modes
 
