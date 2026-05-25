@@ -4,43 +4,58 @@ A transparent multi-agent research assistant built on Semantic Kernel + Blazor S
 
 The hook: most multi-agent demos are black boxes. AgentScope shows the agent graph executing live — every tool call, every token, every decision visible in real time.
 
-## Status — Week 3 (token & cost tracking)
+## Features
 
-Week 1 foundations (still in place):
+### Foundations
 - Clean Architecture solution (Domain → Application → Infrastructure → Web)
 - Centralised package management (`Directory.Packages.props`)
 - Semantic Kernel `ChatCompletionAgent` with auto function calling
-- Tavily web search plugin registered as a kernel function
 - **Per-run event channels** — concurrent runs are isolated
 - **AsyncLocal run context** — concurrent agents attribute their tool events correctly
 - `IFunctionInvocationFilter` captures every tool call onto the event bus, with no per-tool wiring
 - Live token streaming + event log UI over SignalR
 
-New in week 2:
-- **Multi-agent orchestration**: planner → researchers (parallel fan-out) → critic → synthesizer, behind an `IOrchestrator` port
+### Multi-agent research orchestrator
+- **Pipeline**: planner → researchers (parallel fan-out) → critic → synthesizer, behind an `IOrchestrator` port
 - **Structured JSON outputs** for the planner (`sub_questions`) and critic (`ok`, `missing_topics`, `weak_claims`, `shape_mismatch`)
 - **Critic-driven retry**: when the critic flags a shape mismatch or weak claim, the orchestrator runs one focused researcher pass before synthesis (capped at 1 retry)
+- **Per-role model overrides + retry toggle** (`OrchestratorConfig`) — the orchestrator builds one kernel per role so each agent can run on a different model. Used by the eval harness to compare variants.
+- Tests for orchestrator wiring, the critic-driven retry, output parsing.
+
+### Practice mode (interview-style learning loop)
+- Second orchestrator at `/interview` repurposes the multi-agent infrastructure as a practice coach: **Interviewer → Probe → Hint → Grader → Coach**, plus a **ModelAnswer** agent when the candidate gives up.
+- **Two formats**: Discussion (multi-turn Q&A with probes/hints/grader/coach) and QuickCheck (batch of multiple-choice questions with explanations).
+- **Curated topic catalogue** across five tracks (System Design, Architecture, AI Engineering, Testing, Code Craft), each split into Concept (building blocks) and Exercise (worked design problems) groups. Per-group steering produces compact code-anchored explanations for Concepts and longer architecture-walkthroughs for Exercises.
+- Sessions persist to Past Runs with `Variant = "interview"` / `"interview-quickcheck"`. See [docs/interview-mode.md](docs/interview-mode.md).
+
+### RAG over curated book corpora
+- `tools/AgentScope.Indexer` extracts text from PDFs, chunks, embeds with `text-embedding-3-small`, and writes to a Qdrant collection per corpus.
+- Each enabled corpus is registered on the kernel as a distinct plugin (e.g. `ArchitectureCorpus.Search`, `SystemDesignCorpus.Search`, `AiEngineeringCorpus.Search`, `TestingCorpus.Search`, `CodeCraftCorpus.Search`); the researcher / interviewer agents pick the most specific corpus per question.
+- Web search via Tavily as a fallback when no corpus is relevant.
+- `BookLookupPlugin` for Open Library (table-of-contents lookups web search struggles with).
+- See [docs/rag-corpora.md](docs/rag-corpora.md).
+
+### Working memory
 - **`IWorkingMemory` port** with two implementations:
   - `NullWorkingMemory` (default — app runs without a vector store)
   - `QdrantWorkingMemory` (per-run isolation via a `run_id` payload filter, OpenAI embeddings)
-- **Second specialised plugin**: `BookLookupPlugin` for Open Library (table of contents that web search struggles with)
-- Tests for orchestrator wiring, the critic-driven retry, output parsing, and in-memory working memory isolation
 
-New in week 3:
-- **Real token usage** extracted from OpenAI's streaming responses via `stream_options.include_usage` — `AgentFinishedEvent` now carries actual `TokensIn`/`TokensOut` instead of hardcoded zeros
-- **`IUsageCalculator` port + `ModelPricingCalculator`** — per-model USD pricing table (gpt-4o-mini, gpt-4o, gpt-4.1, embeddings) returning `null` for unknown models so the UI can show "—" instead of misleading `$0.00`
-- **Run-level aggregation** — the system-level terminal `AgentFinishedEvent` sums tokens and cost across every sub-agent invocation (including the critic-driven retry)
-- **UI surface**: per-agent token chip on each `agent.finished` row, total run cost shown in the header
+### Cost & token tracking
+- **Real token usage** extracted from OpenAI's streaming responses via `stream_options.include_usage` — `AgentFinishedEvent` carries actual `TokensIn`/`TokensOut`.
+- **`IUsageCalculator` port + `ModelPricingCalculator`** — per-model USD pricing table (gpt-4o-mini, gpt-4o, gpt-4.1, embeddings) returning `null` for unknown models so the UI can show "—" instead of misleading `$0.00`.
+- **Truthful per-model cost** — `UsageExtractor` reads the model name from the OpenAI response metadata (e.g. `gpt-4o-2024-08-06`) and feeds *that* to the pricing calculator. Cached agent model is fallback only — important once per-role overrides are in play.
+- **Run-level aggregation** — the terminal `AgentFinishedEvent` sums tokens and cost across every sub-agent invocation (including critic-driven retries).
+- **UI surface**: per-agent token chip on each `agent.finished` row, total run cost shown in the header.
 
-New since week 3:
-- **Per-role model overrides + retry toggle** (`OrchestratorConfig`) — the orchestrator builds one kernel per role so each agent can run on a different model. Used by the eval harness to compare variants.
-- **Eval harness** (`tests/AgentScope.Evals`) — console CLI that runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes JSONL results. Compare quality-vs-cost across orchestrator variants. See [docs/evals.md](docs/evals.md).
-- **Run persistence + Past Runs viewer** — every UI run is persisted to JSONL (`ui-{yyyyMMdd}.jsonl`); the eval CLI writes its own variant-stamped files. A new `/past-runs` page in the web app lists all of them with drill-in to answer, judge score, and reasoning. See [docs/persistence-and-past-runs.md](docs/persistence-and-past-runs.md).
-- **RAG over multiple curated book corpora** — `tools/AgentScope.Indexer` extracts text from PDFs, chunks, embeds with `text-embedding-3-small`, and writes to a Qdrant collection per corpus. Each enabled corpus is registered on the researcher's kernel as a distinct plugin (e.g. `ArchitectureCorpus.Search`, `SystemDesignCorpus.Search`); the researcher picks the most specific corpus per sub-question and falls back to web search. See [docs/rag-corpora.md](docs/rag-corpora.md).
-- **Truthful per-model cost** — `UsageExtractor` now reads the model name from the OpenAI response metadata (e.g. `gpt-4o-2024-08-06`) and feeds *that* to the pricing calculator. Cached agent model is fallback only — important once per-role overrides are in play.
-- **Interview practice mode** — second orchestrator at `/interview` repurposes the multi-agent infrastructure as an AI interviewer (Interviewer → Probe → Grader → Coach). Questions and feedback are grounded in the system-design corpus with book citations. Sessions persist to Past Runs with `Variant = "interview"`. See [docs/interview-mode.md](docs/interview-mode.md).
+### Eval harness
+- `tests/AgentScope.Evals` — console CLI that runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes JSONL results. Compare quality-vs-cost across orchestrator variants. See [docs/evals.md](docs/evals.md).
 
-Coming next: OpenTelemetry tracing, eval comparison view, embeddings-token tracking.
+### Run persistence + Past Runs viewer
+- Every UI run is persisted to JSONL (`ui-{yyyyMMdd}.jsonl`); the eval CLI writes its own variant-stamped files.
+- `/past-runs` page lists all runs with drill-in to answer, judge score, and reasoning. See [docs/persistence-and-past-runs.md](docs/persistence-and-past-runs.md).
+
+### On the roadmap
+OpenTelemetry tracing, eval comparison view, embeddings-token tracking.
 
 ## Architecture
 
@@ -175,7 +190,7 @@ AgentScope/
 
 ## Why Clean Architecture for this
 
-1. **The harness is the product.** The `IResearchAgent` and `IAgentEventBus` ports are the API; SK is the current implementation. Designing them as ports (not classes) means week 2's orchestrator slots in without breaking the use case or the UI.
+1. **The harness is the product.** The `IResearchAgent` and `IAgentEventBus` ports are the API; SK is the current implementation. Designing them as ports (not classes) meant the multi-agent orchestrator and the practice-mode coach could slot in without breaking the use case or the UI.
 2. **Testability.** The use case has a real test with a fake agent. The event bus isolation guarantee is verified, not assumed.
 3. **Portfolio signal.** "Built a Clean Architecture SK app with proper layer boundaries" is a more credible engineering story than "wrapped LangChain."
 

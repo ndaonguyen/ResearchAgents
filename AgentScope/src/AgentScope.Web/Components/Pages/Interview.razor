@@ -13,11 +13,11 @@
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<PageTitle>ResearchAgent — Interview practice</PageTitle>
+<PageTitle>ResearchAgent — Practice</PageTitle>
 
 <div class="app">
     <header>
-        <h1>Interview practice</h1>
+        <h1>Practice</h1>
         <span class="subtitle">System design + Architecture — grounded in your indexed book corpora</span>
         @if (_session is not null && (_session.TotalTokensIn > 0 || _session.TotalTokensOut > 0))
         {
@@ -101,7 +101,7 @@
             }
 
             <button class="primary" @onclick="StartSession" disabled="@_busy">
-                @(_busy ? "Starting…" : "Start interview")
+                @(_busy ? "Starting…" : "Start practice")
             </button>
         </section>
     }
@@ -335,7 +335,7 @@
                     <button class="primary" @onclick="NextDiscussionQuestion" disabled="@_busy">
                         @(_busy ? "Loading…" : "Next question →")
                     </button>
-                    <button @onclick="ResetSession" disabled="@_busy">Start a new interview</button>
+                    <button @onclick="ResetSession" disabled="@_busy">Start a new practice</button>
                 </div>
             </section>
         }
@@ -1008,8 +1008,8 @@
 
     private static string LabelFor(Speaker s) => s switch
     {
-        Speaker.Interviewer => "Interviewer",
-        Speaker.Probe => "Interviewer (follow-up)",
+        Speaker.Interviewer => "Question",
+        Speaker.Probe => "Follow-up",
         Speaker.Hint => "💡 Hint",
         Speaker.ModelAnswer => "🏳️ Model answer",
         Speaker.User => "You",

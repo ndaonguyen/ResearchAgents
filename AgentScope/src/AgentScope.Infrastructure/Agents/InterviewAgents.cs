@@ -37,11 +37,30 @@ internal static class TopicGroupHints
             "in code. Prioritise: a short snippet using a specific library/API, the API signature " +
             "or config key that matters, and one named real-world anti-pattern to avoid.",
         TopicGroup.Exercise =>
-            "Group hint: this is an EXERCISE (worked design problem) — the practical content should " +
-            "anchor the idea in a real system. Prioritise: named tools wired together (e.g. Kafka + " +
-            "Redis + Envoy), concrete numbers tied to the stated scale (p99 ms, partition counts, " +
-            "replication factors, cache hit-rate targets), and one named real production system or " +
-            "post-mortem.",
+            "Group hint: this is an EXERCISE (worked design problem). The practical content IS the " +
+            "core of this answer — go deep, and let it run significantly longer than the theory. " +
+            "Cover, in order:\n" +
+            "  1. Architecture sketch — every service/component named, how they wire together, " +
+            "     which links are sync vs async, who owns the data. A pseudo-diagram in text or a " +
+            "     numbered flow is fine.\n" +
+            "  2. Concrete technology choices, each justified against the stated constraint " +
+            "     (e.g. \"Kafka because we need durable replay across 3 AZs at 50k msg/s\", not " +
+            "     \"a message broker\").\n" +
+            "  3. Data design — schema or event payload sketches in a fenced code block, " +
+            "     partition keys, indexing strategy, consistency model. Show the shape.\n" +
+            "  4. Concrete numbers tied to the scale in the question: p50/p99 latency budgets in " +
+            "     ms, RPS, partition counts, replication factor, retention windows, cache hit-rate " +
+            "     targets. Not \"low latency\" — actual numbers.\n" +
+            "  5. Failure modes & compensation — which steps can fail, how each is retried or " +
+            "     compensated, what idempotency keys / dedup / outbox mechanisms protect against " +
+            "     double-effects.\n" +
+            "  6. One named real production system or public post-mortem that solved a similar " +
+            "     problem (Stripe, Shopify, Uber Eng blog, Discord, Netflix, AWS post-mortem, " +
+            "     etc.) — what they learned, not just that they did it.\n" +
+            "  7. Two trade-offs you explicitly chose against, with a one-line reason each.\n" +
+            "Use sub-headings (### …) so the candidate can scan it. Code/schema snippets are " +
+            "encouraged; a single snippet up to ~30 lines is fine. The Practical section can " +
+            "comfortably be 8-14 short paragraphs for a design exercise.",
         _ => ""
     };
 }
@@ -385,10 +404,11 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
               partition counts, replication factors, batch sizes, TTLs, retry windows,
               cache hit-rate targets. Not "low latency" — "p99 < 80ms, achieved by
               warming the L1 cache to >95% hit rate".
-        - The Practical section should be ~30-40% of the answer's length. Theory
-          without it is incomplete.
-        - 4-8 short paragraphs for the theory, then the Practical section. Total length
-          should be dense, not padded.
+        - Theory without the Practical section is incomplete. Let the question's depth
+          set the lengths — Concept topics typically need a compact Practical section,
+          while Exercise (design) topics need it to be the longest part of the answer.
+          Do not pad either section. Hard caps: theory ≤ 8 short paragraphs, Practical
+          section ≤ 14 short paragraphs, any single code/schema snippet ≤ 30 lines.
         - This is the candidate's learning artifact — be specific and dense.
         - Output ONLY the answer text. No "Here's the model answer:" preamble.
         """;
