@@ -342,7 +342,28 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
         - Structure the answer the way a strong interviewer would: state assumptions
           and rough scale first, then walk through the design decisions with their
           trade-offs, then call out edge cases / things to discuss further.
-        - 4-8 short paragraphs OR a numbered list of decisions with rationale.
+        - You MUST include a "## Practical / In code" section near the end that grounds
+          the theory in something a candidate could actually build. It must contain at
+          least THREE of the following, not just generic verbs:
+            * Concrete tools/products by name (e.g. Kafka, Redis, Istio, BM25 + a
+              cross-encoder re-ranker, pgbouncer, Envoy, OpenTelemetry, Stripe Webhooks).
+              Explain *why that specific tool* fits the constraint, not just "use a
+              message broker".
+            * A short pseudo-code, config, or schema snippet in a fenced code block
+              (SQL DDL, a JSON/YAML config fragment, a 5-15 line function, an API
+              signature, an event payload — whatever fits the question).
+            * A real-world reference: "how Stripe handles idempotency keys", "Shopify's
+              cell-based architecture", "Netflix's Hystrix → resilience4j migration",
+              "Discord's switch from Cassandra to ScyllaDB", or a named public incident
+              / post-mortem. Be specific; vague "large companies do X" does not count.
+            * Concrete numbers tied to the constraints: actual p99 budgets in ms,
+              partition counts, replication factors, batch sizes, TTLs, retry windows,
+              cache hit-rate targets. Not "low latency" — "p99 < 80ms, achieved by
+              warming the L1 cache to >95% hit rate".
+        - The Practical section should be ~30-40% of the answer's length. Theory
+          without it is incomplete.
+        - 4-8 short paragraphs for the theory, then the Practical section. Total length
+          should be dense, not padded.
         - This is the candidate's learning artifact — be specific and dense.
         - Output ONLY the answer text. No "Here's the model answer:" preamble.
         """;
@@ -438,8 +459,15 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
         - Correct count per question is 1 OR more — pick what's appropriate. Some questions
           are clean single-answer ("Which is the PRIMARY purpose of consistent hashing?"),
           others are "select all that apply".
-        - Each Explanation must justify the correct answers AND briefly say why the wrong
-          ones are wrong, citing the book + page range.
+        - Each Explanation must have TWO parts:
+            1. "Why" — 2-3 sentences justifying the correct answer(s) AND dismissing
+               the wrong ones, citing book + page range.
+            2. "In practice" — 2-4 sentences (and/or a short fenced code/config snippet)
+               showing what this looks like in real code or in a real system. Name a
+               concrete tool, library, or company example (e.g. "Redis SETNX for the
+               lock", "Kafka's acks=all + min.insync.replicas=2", "how Stripe issues
+               idempotency keys"). Vague advice like "use a database" does not count —
+               name the product and say why it fits.
         - Output JSON only:
           {
             "questions": [
@@ -451,7 +479,7 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
                   {"id": "c", "text": "<option text>", "correct": true|false},
                   {"id": "d", "text": "<option text>", "correct": true|false}
                 ],
-                "explanation": "<2-3 sentences justifying correct + dismissing wrong, with citation>",
+                "explanation": "Why: <2-3 sentences justifying correct + dismissing wrong, with citation>\n\nIn practice: <2-4 sentences with a concrete tool/library/company example, optionally a short fenced code snippet>",
                 "citations": ["<Book Name, pp. X-Y>"]
               },
               ... (N total)
