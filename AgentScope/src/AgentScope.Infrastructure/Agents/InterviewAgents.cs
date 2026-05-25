@@ -21,6 +21,31 @@ namespace AgentScope.Infrastructure.Agents;
 /// reduces duplication of using statements and the streaming boilerplate.
 /// </summary>
 
+/// <summary>
+/// Per-<see cref="TopicGroup"/> steer for the "Practical" content the model produces.
+/// Concept topics want the practical anchor to be a small code/library example;
+/// Exercise topics want named tools wired together with concrete numbers and a
+/// real-system reference. Callers append this to the user message so the system
+/// prompt itself stays group-agnostic.
+/// </summary>
+internal static class TopicGroupHints
+{
+    public static string PracticalSteer(TopicGroup group) => group switch
+    {
+        TopicGroup.Concept =>
+            "Group hint: this is a CONCEPT topic — the practical content should anchor the idea " +
+            "in code. Prioritise: a short snippet using a specific library/API, the API signature " +
+            "or config key that matters, and one named real-world anti-pattern to avoid.",
+        TopicGroup.Exercise =>
+            "Group hint: this is an EXERCISE (worked design problem) — the practical content should " +
+            "anchor the idea in a real system. Prioritise: named tools wired together (e.g. Kafka + " +
+            "Redis + Envoy), concrete numbers tied to the stated scale (p99 ms, partition counts, " +
+            "replication factors, cache hit-rate targets), and one named real production system or " +
+            "post-mortem.",
+        _ => ""
+    };
+}
+
 public sealed class InterviewerAgent : IInterviewerAgent
 {
     private const string SystemPrompt = """
@@ -413,8 +438,9 @@ public sealed class ModelAnswerAgent : IModelAnswerAgent
                               ?? $"(unknown question on topic: {session.Topic.DisplayName})";
 
         var corpus = InterviewTrackCorpus.CorpusPluginName(session.Topic.Track);
-        var prompt = $"Topic: {session.Topic.DisplayName} (track: {session.Topic.Track})\n" +
+        var prompt = $"Topic: {session.Topic.DisplayName} (track: {session.Topic.Track}, group: {session.Topic.Group})\n" +
                      $"Use {corpus}.Search to ground the answer.\n\n" +
+                     $"{TopicGroupHints.PracticalSteer(session.Topic.Group)}\n\n" +
                      $"Interview question:\n{openingQuestion}\n\n" +
                      "Produce the model answer.";
         var userMessage = new ChatMessageContent(AuthorRole.User, prompt);
@@ -460,14 +486,16 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
           are clean single-answer ("Which is the PRIMARY purpose of consistent hashing?"),
           others are "select all that apply".
         - Each Explanation must have TWO parts:
-            1. "Why" — 2-3 sentences justifying the correct answer(s) AND dismissing
-               the wrong ones, citing book + page range.
-            2. "In practice" — 2-4 sentences (and/or a short fenced code/config snippet)
-               showing what this looks like in real code or in a real system. Name a
-               concrete tool, library, or company example (e.g. "Redis SETNX for the
-               lock", "Kafka's acks=all + min.insync.replicas=2", "how Stripe issues
-               idempotency keys"). Vague advice like "use a database" does not count —
-               name the product and say why it fits.
+            1. "Why" — justify the correct answer(s) AND dismiss the wrong ones,
+               citing book + page range.
+            2. "In practice" — show what this looks like in real code or in a real
+               system. Name a concrete tool, library, or willcompany example (e.g.
+               "Redis SETNX for the lock", "Kafka's acks=all + min.insync.replicas=2",
+               "how Stripe issues idempotency keys"), optionally with a short fenced
+               code/config snippet. Vague advice like "use a database" does not count
+               — name the product and say why it fits.
+          Let the question's depth set the length; do not pad. Hard cap: ~8 sentences
+          per part, and code snippets ~20 lines and maximum ~40 line.
         - Output JSON only:
           {
             "questions": [
@@ -535,8 +563,10 @@ public sealed class QuickCheckAgent : IQuickCheckAgent
 
         var corpus = InterviewTrackCorpus.CorpusPluginName(topic.Track);
         var userMessage = new ChatMessageContent(AuthorRole.User,
-            $"Topic: {topic.DisplayName} (track: {topic.Track})\n" +
+            $"Topic: {topic.DisplayName} (track: {topic.Track}, group: {topic.Group})\n" +
             $"Use {corpus}.Search to ground each question.\n\n" +
+            $"{TopicGroupHints.PracticalSteer(topic.Group)}\n" +
+            "(Apply the group hint to each question's \"In practice\" section.)\n\n" +
             $"Generate {count} distinct MCQs on this topic. Make sure each covers a different angle.");
 
         var sb = new StringBuilder();
