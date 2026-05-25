@@ -23,6 +23,12 @@ public static class InterviewTopics
         new InterviewTopic("rate-limiting",     "Rate limiting",                          TopicGroup.Concept,  InterviewTrack.SystemDesign),
         new InterviewTopic("consistent-hash",   "Consistent hashing",                     TopicGroup.Concept,  InterviewTrack.SystemDesign),
         new InterviewTopic("capacity",          "Capacity estimation & back-of-envelope", TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("transactions-isolation", "Transactions & isolation levels",  TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("two-phase-commit",  "Distributed transactions & two-phase commit", TopicGroup.Concept, InterviewTrack.SystemDesign),
+        new InterviewTopic("consensus",         "Consensus (Raft, Paxos basics, ZAB)",    TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("stream-processing", "Stream processing & materialized views", TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("storage-engines",   "Storage engines (B-trees vs LSM-trees)", TopicGroup.Concept,  InterviewTrack.SystemDesign),
+        new InterviewTopic("cdc",               "Change Data Capture (CDC)",              TopicGroup.Concept,  InterviewTrack.SystemDesign),
 
         // -------- System Design — Design exercises --------
         new InterviewTopic("url-shortener",     "Design a URL shortener",                 TopicGroup.Exercise, InterviewTrack.SystemDesign),
@@ -30,6 +36,8 @@ public static class InterviewTopics
         new InterviewTopic("news-feed",         "Design a news feed",                     TopicGroup.Exercise, InterviewTrack.SystemDesign),
         new InterviewTopic("notification",      "Design a notification system",           TopicGroup.Exercise, InterviewTrack.SystemDesign),
         new InterviewTopic("rate-limiter-svc",  "Design a rate-limiter service",          TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("design-stream-pipeline", "Design a stream-processing pipeline (fraud detection / analytics)", TopicGroup.Exercise, InterviewTrack.SystemDesign),
+        new InterviewTopic("isolation-strategy", "Choose isolation level & lock strategy for a high-contention system", TopicGroup.Exercise, InterviewTrack.SystemDesign),
 
         // -------- Architecture — Concepts --------
         new InterviewTopic("ddd-bounded",       "Bounded contexts & ubiquitous language", TopicGroup.Concept,  InterviewTrack.Architecture),
@@ -46,6 +54,11 @@ public static class InterviewTopics
         new InterviewTopic("arch-quanta",       "Architectural quanta & deployability boundaries", TopicGroup.Concept, InterviewTrack.Architecture),
         new InterviewTopic("adrs",              "Architecture Decision Records (ADRs)",   TopicGroup.Concept,  InterviewTrack.Architecture),
         new InterviewTopic("event-contracts",   "Event contracts & schema evolution",     TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("ddd-strategic-tactical", "Strategic vs Tactical DDD",         TopicGroup.Concept,  InterviewTrack.Architecture),
+        new InterviewTopic("subdomain-types",   "Subdomain types: core / supporting / generic", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("biz-logic-patterns","Business-logic patterns (transaction script, active record, domain model)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("acl-integration",   "Anti-Corruption Layer & integration patterns (Conformist, Customer-Supplier, Open-Host)", TopicGroup.Concept, InterviewTrack.Architecture),
+        new InterviewTopic("coupling-microservices", "Information hiding & coupling types in microservices (afferent/efferent, common, content)", TopicGroup.Concept, InterviewTrack.Architecture),
 
         // -------- Architecture — Design exercises --------
         new InterviewTopic("decompose-mono",    "Decompose a monolith into services",     TopicGroup.Exercise, InterviewTrack.Architecture),
@@ -60,6 +73,8 @@ public static class InterviewTopics
         new InterviewTopic("fitness-funcs",     "Define fitness functions for a quality attribute (security, scalability, …)", TopicGroup.Exercise, InterviewTrack.Architecture),
         new InterviewTopic("service-comms",     "Design service-to-service communication (sync vs async, contracts, versioning)", TopicGroup.Exercise, InterviewTrack.Architecture),
         new InterviewTopic("data-ownership",    "Choose a data ownership model (shared DB, DB-per-service, data mesh)", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("subdomain-classify","Apply subdomain classification to a domain (core/supporting/generic, build-vs-buy)", TopicGroup.Exercise, InterviewTrack.Architecture),
+        new InterviewTopic("design-acl",        "Design an Anti-Corruption Layer for a legacy integration", TopicGroup.Exercise, InterviewTrack.Architecture),
 
         // -------- AI Engineering — Concepts (Huyen) --------
         new InterviewTopic("prompt-eng",        "Prompt engineering fundamentals (zero-shot, few-shot, CoT)", TopicGroup.Concept, InterviewTrack.AiEngineering),
@@ -87,12 +102,14 @@ public static class InterviewTopics
         new InterviewTopic("test-smells",       "Test smells (brittle, slow, opaque, flaky)", TopicGroup.Concept, InterviewTrack.Testing),
         new InterviewTopic("mutation-testing",  "Mutation testing",                         TopicGroup.Concept, InterviewTrack.Testing),
         new InterviewTopic("property-based",    "Property-based testing",                   TopicGroup.Concept, InterviewTrack.Testing),
+        new InterviewTopic("contract-testing",  "Contract testing & consumer-driven contracts (Pact)", TopicGroup.Concept, InterviewTrack.Testing),
 
         // -------- Testing — Design exercises --------
         new InterviewTopic("make-testable",     "Make a hard-to-test class testable",       TopicGroup.Exercise, InterviewTrack.Testing),
         new InterviewTopic("mocking-strategy",  "Choose a mocking strategy for a service-with-many-deps", TopicGroup.Exercise, InterviewTrack.Testing),
         new InterviewTopic("test-plan",         "Design a test plan for a new feature",     TopicGroup.Exercise, InterviewTrack.Testing),
         new InterviewTopic("integration-strategy","Plan an integration-test strategy for a microservices system", TopicGroup.Exercise, InterviewTrack.Testing),
+        new InterviewTopic("design-contract-tests", "Set up consumer-driven contracts between two services", TopicGroup.Exercise, InterviewTrack.Testing),
 
         // -------- Code Craft — Concepts (Good Code/Bad Code + FP in C#) --------
         new InterviewTopic("module-api",        "Module / API design at code level",        TopicGroup.Concept, InterviewTrack.CodeCraft),
