@@ -283,18 +283,62 @@ namespace AgentScope.Indexer
 
         public async Task<float[][]> EmbedBatchAsync(string[] inputs)
         {
-            var response = await _http.PostAsJsonAsync("embeddings", new
+            // OpenAI rate-limits return 429 with a Retry-After header; transient 5xx is
+            // also worth retrying. Up to 6 attempts, exponential backoff with jitter,
+            // capped at 30s — typical TPM resets happen within ~60s so this absorbs the
+            // common case without hanging the indexer indefinitely.
+            const int maxAttempts = 6;
+            for (var attempt = 1; ; attempt++)
             {
-                model = _model,
-                input = inputs
-            });
-            response.EnsureSuccessStatusCode();
+                var response = await _http.PostAsJsonAsync("embeddings", new
+                {
+                    model = _model,
+                    input = inputs
+                });
 
-            var payload = await response.Content.ReadFromJsonAsync<EmbeddingsResponse>();
-            if (payload?.Data is null || payload.Data.Length != inputs.Length)
-                throw new InvalidOperationException("OpenAI embeddings response size did not match input.");
+                if (response.IsSuccessStatusCode)
+                {
+                    var payload = await response.Content.ReadFromJsonAsync<EmbeddingsResponse>();
+                    if (payload?.Data is null || payload.Data.Length != inputs.Length)
+                        throw new InvalidOperationException("OpenAI embeddings response size did not match input.");
+                    return payload.Data.Select(d => d.Embedding ?? Array.Empty<float>()).ToArray();
+                }
 
-            return payload.Data.Select(d => d.Embedding ?? Array.Empty<float>()).ToArray();
+                var transient = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                                || (int)response.StatusCode >= 500;
+                if (!transient || attempt >= maxAttempts)
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    throw new HttpRequestException(
+                        $"OpenAI embeddings failed after {attempt} attempt(s): {(int)response.StatusCode} {response.ReasonPhrase}. Body: {body}");
+                }
+
+                var delay = ComputeRetryDelay(response, attempt);
+                _logger.LogWarning("Embeddings {Status} on attempt {Attempt}/{Max} — retrying in {DelayMs}ms",
+                    (int)response.StatusCode, attempt, maxAttempts, (int)delay.TotalMilliseconds);
+                await Task.Delay(delay);
+            }
+        }
+
+        private static TimeSpan ComputeRetryDelay(HttpResponseMessage response, int attempt)
+        {
+            // Honor Retry-After if the server set it (OpenAI usually does on 429).
+            if (response.Headers.RetryAfter is { } ra)
+            {
+                if (ra.Delta is { } delta) return Cap(delta);
+                if (ra.Date is { } date)
+                {
+                    var until = date - DateTimeOffset.UtcNow;
+                    if (until > TimeSpan.Zero) return Cap(until);
+                }
+            }
+
+            // Otherwise: exponential backoff with jitter (1s, 2s, 4s, 8s, 16s, 30s).
+            var baseSeconds = Math.Min(30, Math.Pow(2, attempt - 1));
+            var jitterMs = Random.Shared.Next(0, 500);
+            return TimeSpan.FromSeconds(baseSeconds) + TimeSpan.FromMilliseconds(jitterMs);
+
+            static TimeSpan Cap(TimeSpan t) => t > TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : t;
         }
 
         private sealed record EmbeddingsResponse(
