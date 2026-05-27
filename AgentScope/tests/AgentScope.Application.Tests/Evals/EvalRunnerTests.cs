@@ -26,7 +26,7 @@ public class EvalRunnerTests
         var startRun = new StartRunUseCase(orchestrator, bus, NullLogger<StartRunUseCase>.Instance);
 
         var judge = new FakeJudge();
-        var runner = new EvalRunner(startRun, judge, NullLogger<EvalRunner>.Instance);
+        var runner = new EvalRunner(startRun, judge, new StubFingerprintProvider(), NullLogger<EvalRunner>.Instance);
 
         var path = Path.Combine(Path.GetTempPath(), $"eval-runner-test-{Guid.NewGuid():N}.jsonl");
         await using (var writer = new ResultsWriter(path))
@@ -53,10 +53,19 @@ public class EvalRunnerTests
             progress.Where(p => p.Result is null).Should().HaveCount(2);
             progress.Where(p => p.Result is not null).Select(p => p.Result!.QuestionId)
                 .Should().Equal("q1", "q2");
+
+            // Fingerprint stamping — every persisted row carries the captured snapshot.
+            progress.Where(p => p.Result is not null)
+                .Select(p => p.Result!.PromptHash)
+                .Should().AllBe("stubhash");
+            progress.Where(p => p.Result is not null)
+                .Select(p => p.Result!.PlannerModel)
+                .Should().AllBe("stub-planner");
         }
 
         var lines = await File.ReadAllLinesAsync(path);
         lines.Should().HaveCount(2);
+        lines.Should().AllSatisfy(l => l.Should().Contain("\"PromptHash\":\"stubhash\""));
 
         File.Delete(path);
     }
@@ -74,7 +83,7 @@ public class EvalRunnerTests
         var startRun = new StartRunUseCase(orchestrator, bus, NullLogger<StartRunUseCase>.Instance);
 
         var judge = new FakeJudge();
-        var runner = new EvalRunner(startRun, judge, NullLogger<EvalRunner>.Instance);
+        var runner = new EvalRunner(startRun, judge, new StubFingerprintProvider(), NullLogger<EvalRunner>.Instance);
 
         var path = Path.Combine(Path.GetTempPath(), $"eval-runner-error-{Guid.NewGuid():N}.jsonl");
         await using (var writer = new ResultsWriter(path))
@@ -104,6 +113,12 @@ public class EvalRunnerTests
             Calls.Add((question, answer));
             return Task.FromResult(new JudgeVerdict(4, "stub", new AgentUsage(10, 5, 0.001m)));
         }
+    }
+
+    private sealed class StubFingerprintProvider : IOrchestratorFingerprintProvider
+    {
+        public OrchestratorFingerprint Capture(OrchestratorConfig config) =>
+            new("stubhash", "stub-planner", "stub-researcher", "stub-critic", "stub-synthesizer");
     }
 
     private sealed class FakeOrchestrator : IOrchestrator

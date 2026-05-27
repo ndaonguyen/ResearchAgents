@@ -30,7 +30,14 @@ public sealed class OpenAiOptions
     [Required]
     public string ApiKey { get; init; } = "";
 
-    public string Model { get; init; } = "gpt-4o-mini";
+    /// <summary>
+    /// Default chat-completion model for every agent role (planner / researcher / critic
+    /// / synthesizer). Pinned to a dated snapshot so eval scores stay comparable across
+    /// silent OpenAI alias rotations — same reason <see cref="JudgeOptions.Model"/> is
+    /// pinned. Override per-role via <c>OrchestratorConfig</c> at the variant level when
+    /// you want to compare different models on the same questions.
+    /// </summary>
+    public string Model { get; init; } = "gpt-4o-mini-2024-07-18";
 
     public string EmbeddingModel { get; init; } = "text-embedding-3-small";
 }

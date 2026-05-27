@@ -9,7 +9,7 @@
   "AgentScope": {
     "OpenAi": {
       "ApiKey": "sk-REPLACE_ME",
-      "Model": "gpt-4o-mini"
+      "Model": "gpt-4o-mini-2024-07-18"
     },
     "Tavily": {
       "ApiKey": "tvly-REPLACE_ME"

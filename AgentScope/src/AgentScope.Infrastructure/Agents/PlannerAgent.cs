@@ -20,7 +20,7 @@ namespace AgentScope.Infrastructure.Agents;
 /// </summary>
 public sealed class PlannerAgent : IPlannerAgent
 {
-    private const string SystemPrompt = """
+    internal const string SystemPrompt = """
         You decompose a research question into 2-5 focused, standalone sub-questions
         that can each be answered independently by a web search.
 

@@ -83,6 +83,10 @@ public static class InfrastructureServiceCollectionExtensions
         // orchestrator scope when invoked through EvalRunner.
         services.AddScoped<IAnswerJudge, LlmJudge>();
 
+        // Captures the resolved-models + prompt-hash for each variant run, stamped into
+        // every EvalResult so historical comparisons stay honest across config/prompt drift.
+        services.AddSingleton<IOrchestratorFingerprintProvider, OrchestratorFingerprintProvider>();
+
         return services;
     }
 }

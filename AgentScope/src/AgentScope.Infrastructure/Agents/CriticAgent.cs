@@ -19,7 +19,7 @@ namespace AgentScope.Infrastructure.Agents;
 /// </summary>
 public sealed class CriticAgent : ICriticAgent
 {
-    private const string SystemPrompt = """
+    internal const string SystemPrompt = """
         You are a research critic. Given an original question and N research summaries,
         evaluate whether the summaries together adequately answer the original question.
 

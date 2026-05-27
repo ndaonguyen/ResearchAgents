@@ -21,12 +21,18 @@ public sealed class EvalRunner
 
     private readonly StartRunUseCase _startRun;
     private readonly IAnswerJudge _judge;
+    private readonly IOrchestratorFingerprintProvider _fingerprintProvider;
     private readonly ILogger<EvalRunner> _logger;
 
-    public EvalRunner(StartRunUseCase startRun, IAnswerJudge judge, ILogger<EvalRunner> logger)
+    public EvalRunner(
+        StartRunUseCase startRun,
+        IAnswerJudge judge,
+        IOrchestratorFingerprintProvider fingerprintProvider,
+        ILogger<EvalRunner> logger)
     {
         _startRun = startRun;
         _judge = judge;
+        _fingerprintProvider = fingerprintProvider;
         _logger = logger;
     }
 
@@ -37,7 +43,10 @@ public sealed class EvalRunner
         Action<EvalProgress>? onProgress = null,
         CancellationToken ct = default)
     {
-        _logger.LogInformation("Running variant '{Variant}' over {Count} questions", variant.Label, questions.Count);
+        var fingerprint = _fingerprintProvider.Capture(variant.Config);
+        _logger.LogInformation(
+            "Running variant '{Variant}' over {Count} questions (prompt={Hash})",
+            variant.Label, questions.Count, fingerprint.PromptHash);
 
         for (var i = 0; i < questions.Count; i++)
         {
@@ -45,14 +54,14 @@ public sealed class EvalRunner
             var q = questions[i];
             onProgress?.Invoke(new EvalProgress(i, questions.Count, q, null));
 
-            var result = await RunSingleAsync(variant, q, ct);
+            var result = await RunSingleAsync(variant, q, fingerprint, ct);
             await writer.AppendAsync(result, ct);
 
             onProgress?.Invoke(new EvalProgress(i + 1, questions.Count, q, result));
         }
     }
 
-    private async Task<EvalResult> RunSingleAsync(EvalVariant variant, EvalQuestion question, CancellationToken outerCt)
+    private async Task<EvalResult> RunSingleAsync(EvalVariant variant, EvalQuestion question, OrchestratorFingerprint fingerprint, CancellationToken outerCt)
     {
         using var perQuestionCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
         perQuestionCts.CancelAfter(PerQuestionTimeout);
@@ -126,7 +135,12 @@ public sealed class EvalRunner
             JudgeTokensIn: verdict?.Usage.TokensIn ?? 0,
             JudgeTokensOut: verdict?.Usage.TokensOut ?? 0,
             JudgeCostUsd: verdict?.Usage.CostUsd,
-            CompletedAt: DateTime.UtcNow);
+            CompletedAt: DateTime.UtcNow,
+            PromptHash: fingerprint.PromptHash,
+            PlannerModel: fingerprint.PlannerModel,
+            ResearcherModel: fingerprint.ResearcherModel,
+            CriticModel: fingerprint.CriticModel,
+            SynthesizerModel: fingerprint.SynthesizerModel);
     }
 }
 

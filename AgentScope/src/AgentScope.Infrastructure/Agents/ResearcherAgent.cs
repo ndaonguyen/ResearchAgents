@@ -19,7 +19,7 @@ namespace AgentScope.Infrastructure.Agents;
 /// </summary>
 public sealed class ResearcherAgent : IResearcherAgent
 {
-    private const string SystemPrompt = """
+    internal const string SystemPrompt = """
         You research one sub-question and return a concise factual summary.
 
         Rules:

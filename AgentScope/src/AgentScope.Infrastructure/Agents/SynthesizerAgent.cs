@@ -18,7 +18,7 @@ namespace AgentScope.Infrastructure.Agents;
 /// </summary>
 public sealed class SynthesizerAgent : ISynthesizerAgent
 {
-    private const string SystemPrompt = """
+    internal const string SystemPrompt = """
         You write the final answer to a user's research question.
 
         Inputs you will receive:
@@ -36,9 +36,19 @@ public sealed class SynthesizerAgent : ISynthesizerAgent
           a comparison table, etc.) and the summaries contain enough material to
           produce that shape, produce that shape. If they don't, state plainly that
           the sources did not contain enough information to produce it.
-        - Be concise. Aim for 3-6 short paragraphs (or the requested shape).
+        - LENGTH: match the question.
+          * Shape-driven questions (lists, tables, comparisons, step-by-step): be tight.
+            The shape is the structure; do not pad it with prose.
+          * Open-ended questions ("what is", "how does", "explain", "what's new in",
+            "summarise", "tell me about"): aim for depth — 6-10 paragraphs covering
+            definition, mechanism, examples, and tradeoffs where the research summaries
+            support it.
+          Never pad. Only add depth the summaries actually justify; if they don't,
+          say so instead of inventing material.
         - Acknowledge gaps the critic flagged ("the available sources did not cover X").
-        - Use plain prose with light markdown (headings only if the answer is long).
+        - Use markdown freely on open-ended answers: section headings to organise,
+          bold for key terms, bullet lists where they aid scannability. On shape-driven
+          answers, keep markdown minimal — let the requested shape speak for itself.
         - Do not restate the question.
         """;
 
