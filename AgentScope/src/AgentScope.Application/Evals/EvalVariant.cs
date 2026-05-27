@@ -1,6 +1,6 @@
 using AgentScope.Application.Abstractions;
 
-namespace AgentScope.Evals;
+namespace AgentScope.Application.Evals;
 
 /// <summary>
 /// A named orchestrator configuration to run against the question set.

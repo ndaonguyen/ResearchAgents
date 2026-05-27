@@ -1,3 +1,4 @@
+using AgentScope.Application.Evals;
 using AgentScope.Application.Interview;
 using AgentScope.Application.Runs;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +11,7 @@ public static class ApplicationServiceCollectionExtensions
     {
         services.AddScoped<StartRunUseCase>();
         services.AddScoped<InterviewSessionUseCase>();
+        services.AddScoped<EvalRunner>();
         return services;
     }
 }

@@ -18,14 +18,38 @@ public sealed class AgentHub : Hub
 {
     private readonly StartRunUseCase _startRun;
     private readonly RunPersister _persister;
+    private readonly EvalQueue _evalQueue;
     private readonly ILogger<AgentHub> _logger;
 
-    public AgentHub(StartRunUseCase startRun, RunPersister persister, ILogger<AgentHub> logger)
+    public AgentHub(
+        StartRunUseCase startRun,
+        RunPersister persister,
+        EvalQueue evalQueue,
+        ILogger<AgentHub> logger)
     {
         _startRun = startRun;
         _persister = persister;
+        _evalQueue = evalQueue;
         _logger = logger;
     }
+
+    // Eval-related hub methods. Kept on the same hub as Ask because the Razor pages
+    // already maintain one connection per circuit; a second hub would mean a second
+    // connection for no gain.
+
+    public Task SubscribeToEval(string jobId) =>
+        Groups.AddToGroupAsync(Context.ConnectionId, $"eval-{jobId}");
+
+    public Task UnsubscribeFromEval(string jobId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, $"eval-{jobId}");
+
+    public Task SubscribeToAllEvals() =>
+        Groups.AddToGroupAsync(Context.ConnectionId, "eval-all");
+
+    public Task UnsubscribeFromAllEvals() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, "eval-all");
+
+    public bool CancelEval(string jobId) => _evalQueue.TryCancel(jobId);
 
     public async Task Ask(string question)
     {

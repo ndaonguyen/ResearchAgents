@@ -4,35 +4,38 @@ using AgentScope.Domain.Agents;
 using AgentScope.Domain.Events;
 using Microsoft.Extensions.Logging;
 
-namespace AgentScope.Evals;
+namespace AgentScope.Application.Evals;
 
 /// <summary>
 /// Runs a question set through the orchestrator once per variant. Sequential by design —
 /// parallelism here would (a) trip OpenAI/Tavily rate limits since the orchestrator already
-/// fans out researchers internally, and (b) make per-question attribution noisier. Add a
-/// concurrency knob later only if a single-threaded run is too slow.
+/// fans out researchers internally, and (b) make per-question attribution noisier.
+///
+/// Progress is reported via an <see cref="EvalProgress"/> callback so the runner can be
+/// driven from a CLI (writes to console) or a background worker (fans out to SignalR)
+/// without changing the runner itself.
 /// </summary>
 public sealed class EvalRunner
 {
     private static readonly TimeSpan PerQuestionTimeout = TimeSpan.FromMinutes(3);
 
     private readonly StartRunUseCase _startRun;
-    private readonly LlmJudge _judge;
-    private readonly ResultsWriter _writer;
+    private readonly IAnswerJudge _judge;
     private readonly ILogger<EvalRunner> _logger;
 
-    public EvalRunner(StartRunUseCase startRun, LlmJudge judge, ResultsWriter writer, ILogger<EvalRunner> logger)
+    public EvalRunner(StartRunUseCase startRun, IAnswerJudge judge, ILogger<EvalRunner> logger)
     {
         _startRun = startRun;
         _judge = judge;
-        _writer = writer;
         _logger = logger;
     }
 
     public async Task RunVariantAsync(
         EvalVariant variant,
         IReadOnlyList<EvalQuestion> questions,
-        CancellationToken ct)
+        ResultsWriter writer,
+        Action<EvalProgress>? onProgress = null,
+        CancellationToken ct = default)
     {
         _logger.LogInformation("Running variant '{Variant}' over {Count} questions", variant.Label, questions.Count);
 
@@ -40,15 +43,12 @@ public sealed class EvalRunner
         {
             ct.ThrowIfCancellationRequested();
             var q = questions[i];
-            Console.WriteLine($"[{variant.Label}] {i + 1}/{questions.Count}  {q.Id}: {Truncate(q.Question, 80)}");
+            onProgress?.Invoke(new EvalProgress(i, questions.Count, q, null));
 
             var result = await RunSingleAsync(variant, q, ct);
-            await _writer.AppendAsync(result, ct);
+            await writer.AppendAsync(result, ct);
 
-            var scoreText = result.JudgeScore?.ToString() ?? "-";
-            var costText = result.CostUsd is { } c ? $"${c:F4}" : "?";
-            var status = result.Errored ? "ERR" : "OK";
-            Console.WriteLine($"          {status}  score={scoreText}  cost={costText}  duration={result.DurationMs}ms");
+            onProgress?.Invoke(new EvalProgress(i + 1, questions.Count, q, result));
         }
     }
 
@@ -128,7 +128,11 @@ public sealed class EvalRunner
             JudgeCostUsd: verdict?.Usage.CostUsd,
             CompletedAt: DateTime.UtcNow);
     }
-
-    private static string Truncate(string s, int max) =>
-        s.Length <= max ? s : s[..max] + "…";
 }
+
+/// <summary>
+/// Reported once when a question starts (Result null) and once when it finishes
+/// (Result populated). <see cref="Index"/> is the zero-based index of the question
+/// being / just processed; <see cref="Total"/> is the size of the question set.
+/// </summary>
+public sealed record EvalProgress(int Index, int Total, EvalQuestion Question, EvalResult? Result);

@@ -20,7 +20,9 @@
       "Bash(docker --version)",
       "Bash(docker info *)",
       "Read(//tmp/**)",
-      "Bash(dotnet add *)"
+      "Bash(dotnet add *)",
+      "Bash(cmd *)",
+      "Bash(grep -Ev \"NU1507|^$\")"
     ]
   }
 }

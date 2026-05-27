@@ -76,13 +76,16 @@ public sealed class JudgeOptions
 }
 
 /// <summary>
-/// Where the Web UI looks for eval-harness JSONL output. Default is <c>results</c>
-/// relative to the current working directory — which matches where the eval CLI writes
-/// when launched from the repo root.
+/// Where the Web UI looks for eval-harness JSONL output, and where it lists question
+/// sets the user can pick from when triggering an eval from the browser.
+///
+/// Defaults are relative to the process's current working directory — fine when the
+/// Web app is launched from the repo root. Override in appsettings if running elsewhere.
 /// </summary>
 public sealed class EvalsOptions
 {
     public string ResultsDirectory { get; init; } = "results";
+    public string QuestionsDirectory { get; init; } = "tests/AgentScope.Evals/questions";
 }
 
 /// <summary>

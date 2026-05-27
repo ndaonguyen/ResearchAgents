@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AgentScope.Evals;
+namespace AgentScope.Application.Evals;
 
 /// <summary>
 /// Append-only JSONL writer. One row per question. Crash-safe by design — flushes

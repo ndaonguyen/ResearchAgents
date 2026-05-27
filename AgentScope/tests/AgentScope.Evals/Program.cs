@@ -1,8 +1,7 @@
 using System.Text.Json;
 using AgentScope.Application;
 using AgentScope.Application.Abstractions;
-using AgentScope.Application.Runs;
-using AgentScope.Evals;
+using AgentScope.Application.Evals;
 using AgentScope.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -77,8 +76,6 @@ if (string.IsNullOrWhiteSpace(openAiKey) || openAiKey == "set-via-user-secrets-o
     return 1;
 }
 
-builder.Services.AddSingleton<LlmJudge>();
-
 using var host = builder.Build();
 
 // Each question's run is independent but stateless agents can share the scope.
@@ -102,11 +99,7 @@ var config = new OrchestratorConfig(
     SynthesizerModel: parsed.SynthesizerModel,
     EnableCriticRetry: !parsed.NoRetry);
 
-var runner = new EvalRunner(
-    sp.GetRequiredService<StartRunUseCase>(),
-    sp.GetRequiredService<LlmJudge>(),
-    writer,
-    sp.GetRequiredService<ILogger<EvalRunner>>());
+var runner = sp.GetRequiredService<EvalRunner>();
 
 Console.WriteLine($"Writing results to {writer.FilePath}");
 Console.WriteLine();
@@ -119,9 +112,16 @@ Console.CancelKeyPress += (_, e) =>
     e.Cancel = true;
 };
 
+var variant = new EvalVariant(parsed.Variant, config);
+
 try
 {
-    await runner.RunVariantAsync(new EvalVariant(parsed.Variant, config), questions, stopCts.Token);
+    await runner.RunVariantAsync(
+        variant,
+        questions,
+        writer,
+        onProgress: p => PrintProgress(parsed.Variant, p),
+        ct: stopCts.Token);
     return 0;
 }
 catch (OperationCanceledException)
@@ -129,6 +129,25 @@ catch (OperationCanceledException)
     Console.WriteLine("Cancelled.");
     return 130;
 }
+
+static void PrintProgress(string variantLabel, EvalProgress p)
+{
+    if (p.Result is null)
+    {
+        // Question starting.
+        Console.WriteLine($"[{variantLabel}] {p.Index + 1}/{p.Total}  {p.Question.Id}: {Truncate(p.Question.Question, 80)}");
+        return;
+    }
+
+    var r = p.Result;
+    var scoreText = r.JudgeScore?.ToString() ?? "-";
+    var costText = r.CostUsd is { } c ? $"${c:F4}" : "?";
+    var status = r.Errored ? "ERR" : "OK";
+    Console.WriteLine($"          {status}  score={scoreText}  cost={costText}  duration={r.DurationMs}ms");
+}
+
+static string Truncate(string s, int max) =>
+    s.Length <= max ? s : s[..max] + "…";
 
 static List<EvalQuestion> LoadQuestions(string path)
 {

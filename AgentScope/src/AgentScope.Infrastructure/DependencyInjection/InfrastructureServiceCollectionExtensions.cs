@@ -1,8 +1,10 @@
 using AgentScope.Application.Abstractions;
+using AgentScope.Application.Evals;
 using AgentScope.Infrastructure.Configuration;
 using AgentScope.Infrastructure.EventBus;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Agents.Filters;
+using AgentScope.Infrastructure.Evals;
 using AgentScope.Infrastructure.Memory;
 using AgentScope.Infrastructure.Pricing;
 using Microsoft.Extensions.Configuration;
@@ -76,6 +78,10 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Orchestrator — scoped so each request gets its own logger scope.
         services.AddScoped<IOrchestrator, Orchestrator>();
+
+        // LLM-as-judge for the eval harness. Scoped — judge calls are part of an
+        // orchestrator scope when invoked through EvalRunner.
+        services.AddScoped<IAnswerJudge, LlmJudge>();
 
         return services;
     }

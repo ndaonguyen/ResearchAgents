@@ -49,6 +49,7 @@ The hook: most multi-agent demos are black boxes. AgentScope shows the agent gra
 
 ### Eval harness
 - `tests/AgentScope.Evals` — console CLI that runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes JSONL results. Compare quality-vs-cost across orchestrator variants. See [docs/evals.md](docs/evals.md).
+- Same harness is available from the UI at `/evals` — pick a question set + per-role models, enqueue, watch progress stream in. In-flight jobs surface as live "Running…" badges on `/past-runs`.
 
 ### Run persistence + Past Runs viewer
 - Every UI run is persisted to JSONL (`ui-{yyyyMMdd}.jsonl`); the eval CLI writes its own variant-stamped files.
@@ -201,7 +202,6 @@ AgentScope/
 | Embeddings calls (`QdrantWorkingMemory`, indexer, RAG queries) aren't counted toward run cost | Soon |
 | No OpenTelemetry tracing | Soon |
 | Past Runs page doesn't compare variants side-by-side | Soon |
-| Past Runs page doesn't auto-refresh while an eval is running | As needed |
 | Indexer always drops + rebuilds the architecture corpus (no incremental indexing) | As needed |
 | Tavily plugin uses default options (no domain filtering, default depth) | As needed |
 

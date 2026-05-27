@@ -1,4 +1,4 @@
-namespace AgentScope.Evals;
+namespace AgentScope.Application.Evals;
 
 /// <summary>
 /// One entry in an eval question set. <see cref="Rubric"/> is optional — when null,

@@ -1,8 +1,11 @@
 # Eval harness
 
-A console CLI that runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes one JSONL row per question. Used to compare orchestrator variants (different per-role models, retry on/off) on a quality-vs-cost axis.
+Runs a question set through the orchestrator, scores each answer with an LLM-as-judge, and writes one JSONL row per question. Used to compare orchestrator variants (different per-role models, retry on/off) on a quality-vs-cost axis.
 
-Lives in `tests/AgentScope.Evals/`.
+Two front-ends share the same runner (`AgentScope.Application/Evals/EvalRunner`):
+
+- **CLI** — `tests/AgentScope.Evals/`. Best for batch runs and CI.
+- **UI** — `/evals` page in the Web app. Best for ad-hoc one-off variants; shows live progress and feeds straight into `/past-runs`.
 
 ## Setup
 
@@ -105,6 +108,23 @@ Each line is an `EvalResult`:
   "JudgeTokensIn": 612, "JudgeTokensOut": 47,
   "JudgeCostUsd": 0.0001,        // judge-side separately
   "CompletedAt": "2026-05-22T06:06:04.95Z"
+}
+```
+
+## Running evals from the UI
+
+1. Open `/evals` in the Web app.
+2. Pick a variant label, a question set (auto-listed from `AgentScope:Evals:QuestionsDirectory`, defaults to `tests/AgentScope.Evals/questions`), per-role model overrides, and the retry toggle.
+3. Click **Enqueue eval**. The page shows the job's progress live; multiple jobs queue and execute sequentially (same rate-limit reasoning as the CLI).
+4. Cancel an in-flight job with the row's **Cancel** button. The worker drops it on the next question boundary; partial JSONL is preserved.
+5. The `/past-runs` page renders a pulsing **Running…** badge next to any file an active job is currently writing — no refresh needed.
+
+The UI writes to the same JSONL files the CLI does, named `{variant}-{yyyyMMdd-HHmmss}.jsonl`. Configuration lives under `AgentScope:Evals`:
+
+```json
+"Evals": {
+  "ResultsDirectory": "results",
+  "QuestionsDirectory": "tests/AgentScope.Evals/questions"
 }
 ```
 

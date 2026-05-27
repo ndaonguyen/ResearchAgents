@@ -18,6 +18,10 @@ builder.Services
 builder.Services.AddScoped<EvalResultsReader>();
 builder.Services.AddSingleton<RunPersister>();
 
+// Eval queue + worker — singleton queue, BackgroundService that drains it.
+builder.Services.AddSingleton<EvalQueue>();
+builder.Services.AddHostedService<EvalWorker>();
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())

@@ -1,4 +1,4 @@
-namespace AgentScope.Evals;
+namespace AgentScope.Application.Evals;
 
 /// <summary>
 /// One row in the JSONL results file. Both agent-side and judge-side token/cost are

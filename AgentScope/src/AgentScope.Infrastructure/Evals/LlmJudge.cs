@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using AgentScope.Application.Abstractions;
+using AgentScope.Application.Evals;
 using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,7 @@ using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 
-namespace AgentScope.Evals;
+namespace AgentScope.Infrastructure.Evals;
 
 /// <summary>
 /// LLM-as-judge. Scores one (question, answer) pair on a 1-5 scale with one-sentence reasoning.
@@ -20,7 +21,7 @@ namespace AgentScope.Evals;
 /// Calibration discipline: before trusting these scores at scale, hand-grade ~20 outputs
 /// and check agreement with the judge. Without that step, the leaderboard is confidently wrong.
 /// </summary>
-public sealed class LlmJudge
+public sealed class LlmJudge : IAnswerJudge
 {
     private const string DefaultRubric = """
         Score on a 1-5 scale based on:
@@ -153,5 +154,3 @@ public sealed class LlmJudge
         }
     }
 }
-
-public sealed record JudgeVerdict(int? Score, string? Reasoning, AgentUsage Usage);

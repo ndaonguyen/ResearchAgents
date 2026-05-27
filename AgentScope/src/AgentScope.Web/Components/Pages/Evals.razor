@@ -1,0 +1,314 @@
+@page "/evals"
+@rendermode InteractiveServer
+@using System.Globalization
+@using AgentScope.Application.Abstractions
+@using AgentScope.Infrastructure.Configuration
+@using AgentScope.Web.Services
+@using Microsoft.Extensions.Options
+@inject EvalQueue Queue
+@inject IOptions<AgentScopeOptions> Options
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>AgentScope — Evals</PageTitle>
+
+<div class="app">
+    <header>
+        <h1>Run eval</h1>
+        <span class="subtitle">Trigger a variant against a question set; results stream into Past Runs.</span>
+    </header>
+
+    <section class="form-card">
+        <div class="row">
+            <label>
+                <span>Variant label</span>
+                <input @bind="_variant" placeholder="baseline" />
+            </label>
+            <label>
+                <span>Question set</span>
+                <select @bind="_selectedQuestionSet">
+                    @if (_questionSets.Count == 0)
+                    {
+                        <option value="">No question sets found in @QuestionsDirectory</option>
+                    }
+                    @foreach (var qs in _questionSets)
+                    {
+                        <option value="@qs.Path">@qs.Name (@qs.Count questions)</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        <div class="row models">
+            <label>
+                <span>Planner model</span>
+                <select @bind="_plannerModel">
+                    <option value="">(default)</option>
+                    @foreach (var m in ModelChoices)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </select>
+            </label>
+            <label>
+                <span>Researcher model</span>
+                <select @bind="_researcherModel">
+                    <option value="">(default)</option>
+                    @foreach (var m in ModelChoices)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </select>
+            </label>
+            <label>
+                <span>Critic model</span>
+                <select @bind="_criticModel">
+                    <option value="">(default)</option>
+                    @foreach (var m in ModelChoices)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </select>
+            </label>
+            <label>
+                <span>Synthesizer model</span>
+                <select @bind="_synthesizerModel">
+                    <option value="">(default)</option>
+                    @foreach (var m in ModelChoices)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        <div class="row controls">
+            <label class="check">
+                <input type="checkbox" @bind="_enableRetry" />
+                <span>Enable critic-driven retry</span>
+            </label>
+            <button class="primary" @onclick="Enqueue"
+                    disabled="@(string.IsNullOrWhiteSpace(_selectedQuestionSet) || string.IsNullOrWhiteSpace(_variant))">
+                Enqueue eval
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_lastEnqueueMessage))
+        {
+            <div class="hint">@_lastEnqueueMessage</div>
+        }
+    </section>
+
+    <section class="jobs">
+        <h2>Jobs</h2>
+        @if (_jobs.Count == 0)
+        {
+            <div class="empty">No jobs yet. Submit one above.</div>
+        }
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>Variant</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>File</th>
+                        <th>Enqueued</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var j in _jobs)
+                    {
+                        <tr class="status-@j.Status.ToLowerInvariant()">
+                            <td>@j.Variant <span class="muted">#@j.Id</span></td>
+                            <td>@j.Status @if (!string.IsNullOrEmpty(j.ErrorMessage)) { <span class="err-msg">— @j.ErrorMessage</span> }</td>
+                            <td>
+                                @if (j.QuestionsTotal > 0)
+                                {
+                                    <div class="progress-row">
+                                        <div class="progress-bar"><span style="width:@(Percent(j))%"></span></div>
+                                        <span class="progress-text">@j.QuestionsDone / @j.QuestionsTotal</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td><code>@j.OutputFileName</code></td>
+                            <td>@j.EnqueuedAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                            <td>
+                                @if (j.Status is "Queued" or "Running")
+                                {
+                                    <button class="cancel" @onclick="() => Cancel(j.Id)">Cancel</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</div>
+
+<style>
+    .app { max-width: 1200px; margin: 0 auto; padding: 24px; font-family: system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    h2 { font-size: 1.1rem; margin: 16px 0 8px; }
+    .subtitle { color: #666; font-size: 0.85rem; }
+    .muted { color: #94a3b8; font-weight: normal; font-size: 0.85rem; margin-left: 4px; }
+    code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.85em; }
+
+    .form-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .row.models label { flex: 1 1 22%; min-width: 180px; }
+    .row label { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+    .row label > span { font-size: 0.8rem; color: #475569; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    input, select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; font-size: 0.9rem; }
+    .controls { align-items: center; }
+    .check { flex-direction: row; align-items: center; gap: 8px; }
+    .check span { text-transform: none; letter-spacing: normal; font-weight: 500; }
+    button.primary { padding: 10px 18px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button.primary:hover:not(:disabled) { background: #1d4ed8; }
+    button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    button.cancel { padding: 4px 10px; border: 1px solid #fca5a5; background: white; color: #b91c1c; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    button.cancel:hover { background: #fef2f2; }
+    .hint { margin-top: 8px; padding: 8px 12px; background: #ecfeff; border-left: 3px solid #06b6d4; color: #155e75; font-size: 0.85rem; border-radius: 4px; }
+
+    .jobs table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .jobs th { text-align: left; padding: 8px 10px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #475569; }
+    .jobs td { padding: 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .jobs tr.status-running { background: #fefce8; }
+    .jobs tr.status-completed { }
+    .jobs tr.status-cancelled, .jobs tr.status-failed { background: #fef2f2; }
+    .err-msg { color: #b91c1c; font-size: 0.85rem; }
+
+    .progress-row { display: flex; align-items: center; gap: 8px; }
+    .progress-bar { flex: 1; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; min-width: 80px; }
+    .progress-bar > span { display: block; height: 100%; background: #2563eb; transition: width 0.3s ease; }
+    .progress-text { font-size: 0.8rem; color: #475569; font-family: 'JetBrains Mono', 'Consolas', monospace; }
+
+    .empty { padding: 24px; text-align: center; color: #64748b; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1; }
+</style>
+
+@code {
+    // Model picks intentionally hard-coded — keeps the UI predictable. Add to this list
+    // as the orchestrator gains support for new models.
+    private static readonly string[] ModelChoices = new[] { "gpt-4o-mini", "gpt-4o", "gpt-4.1" };
+
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<Evals>? _selfRef;
+
+    private string _variant = "baseline";
+    private string _selectedQuestionSet = "";
+    private string _plannerModel = "";
+    private string _researcherModel = "";
+    private string _criticModel = "";
+    private string _synthesizerModel = "";
+    private bool _enableRetry = true;
+    private string? _lastEnqueueMessage;
+
+    private List<QuestionSetEntry> _questionSets = new();
+    private List<EvalJobSnapshot> _jobs = new();
+
+    private string QuestionsDirectory => Path.GetFullPath(Options.Value.Evals.QuestionsDirectory);
+
+    protected override void OnInitialized()
+    {
+        LoadQuestionSets();
+        Refresh();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/evals-hub.js");
+            await _module.InvokeVoidAsync("init", _selfRef);
+        }
+    }
+
+    private void LoadQuestionSets()
+    {
+        _questionSets.Clear();
+        var dir = QuestionsDirectory;
+        if (!Directory.Exists(dir)) return;
+
+        foreach (var path in Directory.EnumerateFiles(dir, "*.json"))
+        {
+            int count;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                var doc = System.Text.Json.JsonDocument.Parse(stream);
+                count = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+                    ? doc.RootElement.GetArrayLength()
+                    : 0;
+            }
+            catch
+            {
+                continue;
+            }
+            _questionSets.Add(new QuestionSetEntry(Path.GetFileName(path), path, count));
+        }
+
+        if (string.IsNullOrEmpty(_selectedQuestionSet) && _questionSets.Count > 0)
+            _selectedQuestionSet = _questionSets[0].Path;
+    }
+
+    private void Refresh()
+    {
+        _jobs = Queue.Snapshot().ToList();
+    }
+
+    private void Enqueue()
+    {
+        var config = new OrchestratorConfig(
+            PlannerModel:     Nullable(_plannerModel),
+            ResearcherModel:  Nullable(_researcherModel),
+            CriticModel:      Nullable(_criticModel),
+            SynthesizerModel: Nullable(_synthesizerModel),
+            EnableCriticRetry: _enableRetry);
+
+        var state = Queue.Enqueue(new EnqueueEvalRequest(_variant.Trim(), config, _selectedQuestionSet));
+        _lastEnqueueMessage = $"Enqueued #{state.Id} — writing to {state.OutputFileName}";
+        Refresh();
+    }
+
+    private async Task Cancel(string jobId)
+    {
+        if (_module is null) return;
+        await _module.InvokeAsync<bool>("cancelJob", jobId);
+    }
+
+    [JSInvokable]
+    public Task OnEvalEvent(string kind, System.Text.Json.JsonElement payload)
+    {
+        // Either kind ("progress" or "status") implies an underlying job state change —
+        // simplest is to re-snapshot the queue, since the page only shows summary fields.
+        Refresh();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private static int Percent(EvalJobSnapshot j) =>
+        j.QuestionsTotal == 0 ? 0 : (int)Math.Round(100.0 * j.QuestionsDone / j.QuestionsTotal);
+
+    private static string? Nullable(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try { await _module.InvokeVoidAsync("dispose"); } catch { /* circuit closing */ }
+            try { await _module.DisposeAsync(); } catch { /* circuit closing */ }
+        }
+        _selfRef?.Dispose();
+    }
+
+    private sealed record QuestionSetEntry(string Name, string Path, int Count);
+}
