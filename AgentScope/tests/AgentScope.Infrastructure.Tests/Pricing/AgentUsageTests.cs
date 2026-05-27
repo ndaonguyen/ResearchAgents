@@ -32,8 +32,28 @@ public class AgentUsageTests
     }
 
     [Fact]
-    public void Empty_is_all_zeros_with_zero_cost()
+    public void Empty_has_unknown_cost_not_zero()
     {
-        AgentUsage.Empty.Should().Be(new AgentUsage(0, 0, 0m));
+        // Null (not zero) is the only correct identity for cost aggregation. Starting
+        // from zero would mean Empty.Add(unknown) returns zero, collapsing the
+        // "unknown" / "known to be free" distinction the docstring promises.
+        AgentUsage.Empty.Should().Be(new AgentUsage(0, 0, null));
+    }
+
+    [Fact]
+    public void Aggregating_from_Empty_with_all_unknown_costs_stays_unknown()
+    {
+        // Regression: before this guarantee held, the orchestrator's totalUsage started
+        // at zero and Add's (var a, null) => a rule preserved zero through every
+        // unknown-cost agent — surfacing $0.0000 to the UI when every per-agent cost
+        // was actually unknown (e.g. unrecognised model snapshot).
+        var u1 = new AgentUsage(100, 50, null);
+        var u2 = new AgentUsage(200, 80, null);
+
+        var total = AgentUsage.Empty.Add(u1).Add(u2);
+
+        total.CostUsd.Should().BeNull();
+        total.TokensIn.Should().Be(300);
+        total.TokensOut.Should().Be(130);
     }
 }

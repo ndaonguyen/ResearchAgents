@@ -10,7 +10,14 @@ namespace AgentScope.Application.Abstractions;
 /// </summary>
 public sealed record AgentUsage(int TokensIn, int TokensOut, decimal? CostUsd)
 {
-    public static AgentUsage Empty { get; } = new(0, 0, 0m);
+    /// <summary>
+    /// Identity for aggregation. <see cref="CostUsd"/> is null (not zero) so that
+    /// <c>Empty.Add(unknown).Add(unknown) == unknown</c> — a run whose every agent
+    /// reported unknown cost must surface as unknown, not as "$0.0000". Starting
+    /// from zero would let the <see cref="Add"/> rule "null + value = value" silently
+    /// promote the first null into a concrete zero, destroying the distinction.
+    /// </summary>
+    public static AgentUsage Empty { get; } = new(0, 0, null);
 
     /// <summary>Field-wise sum. Null cost is treated as 0 only when at least one side is non-null.</summary>
     public AgentUsage Add(AgentUsage other) => new(
