@@ -14,18 +14,34 @@ public sealed class ModelPricingCalculator : IUsageCalculator
 {
     private sealed record Rates(decimal InputPerMillion, decimal OutputPerMillion);
 
+    // Pricing is keyed by the model id OpenAI returns in response metadata. OpenAI's API
+    // resolves aliases (e.g. "gpt-4o-mini") to a dated snapshot ("gpt-4o-mini-2024-07-18")
+    // before serving — and reports the snapshot, not the alias, back to the caller. We
+    // need entries for BOTH because:
+    //   - the alias is what config / OrchestratorConfig hold (used as the fallback model
+    //     when response metadata is missing);
+    //   - the snapshot is what the response metadata actually carries.
     private static readonly IReadOnlyDictionary<string, Rates> Pricing =
         new Dictionary<string, Rates>(StringComparer.OrdinalIgnoreCase)
         {
-            // Chat completion models
-            ["gpt-4o-mini"]      = new(0.150m, 0.600m),
-            ["gpt-4o"]           = new(2.500m, 10.000m),
-            ["gpt-4.1-mini"]     = new(0.400m, 1.600m),
-            ["gpt-4.1"]          = new(2.000m, 8.000m),
+            // gpt-4o-mini — alias + snapshots
+            ["gpt-4o-mini"]             = new(0.150m, 0.600m),
+            ["gpt-4o-mini-2024-07-18"]  = new(0.150m, 0.600m),
+
+            // gpt-4o — alias + snapshots
+            ["gpt-4o"]                  = new(2.500m, 10.000m),
+            ["gpt-4o-2024-08-06"]       = new(2.500m, 10.000m),
+            ["gpt-4o-2024-11-20"]       = new(2.500m, 10.000m),
+
+            // gpt-4.1 family — alias + snapshots
+            ["gpt-4.1-mini"]            = new(0.400m, 1.600m),
+            ["gpt-4.1-mini-2025-04-14"] = new(0.400m, 1.600m),
+            ["gpt-4.1"]                 = new(2.000m, 8.000m),
+            ["gpt-4.1-2025-04-14"]      = new(2.000m, 8.000m),
 
             // Embedding models — output is unused, charged on input only.
-            ["text-embedding-3-small"] = new(0.020m, 0m),
-            ["text-embedding-3-large"] = new(0.130m, 0m),
+            ["text-embedding-3-small"]  = new(0.020m, 0m),
+            ["text-embedding-3-large"]  = new(0.130m, 0m),
         };
 
     private readonly ILogger<ModelPricingCalculator> _logger;
