@@ -59,8 +59,15 @@ public sealed class KernelFactory : IKernelFactory
     {
         var builder = Kernel.CreateBuilder();
 
+        // Handler chain (outermost first):
+        //   HttpClient → OpenAiTrafficLogger → RateLimitRetryHandler → HttpClientHandler.
+        // Retry is *inside* the logger so retries appear in openai-traffic.log — that's
+        // the only way to confirm "did the retry actually fire?" after the fact.
         var logPath = Path.Combine(AppContext.BaseDirectory, "openai-traffic.log");
-        var httpClient = new HttpClient(new OpenAiTrafficLogger(logPath, new HttpClientHandler()));
+        var retryHandler = new RateLimitRetryHandler(
+            new HttpClientHandler(),
+            _loggerFactory.CreateLogger<RateLimitRetryHandler>());
+        var httpClient = new HttpClient(new OpenAiTrafficLogger(logPath, retryHandler));
 
         builder.AddOpenAIChatCompletion(
             modelId: modelOverride ?? _options.OpenAi.Model,

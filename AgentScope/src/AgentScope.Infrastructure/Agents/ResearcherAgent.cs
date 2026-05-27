@@ -31,6 +31,18 @@ public sealed class ResearcherAgent : IResearcherAgent
           * SystemDesignCorpus.Search — scalable system-design questions (sharding, replication,
             queueing, caching, load balancing, capacity estimation, worked system-design examples
             like URL shorteners, chat systems, news feeds).
+          * AiEngineeringCorpus.Search — production AI/ML system topics (prompt engineering,
+            RAG design, LLM evaluation, embeddings, fine-tuning vs prompting trade-offs,
+            hallucination mitigation, inference cost & latency, guardrails, end-to-end AI
+            product design). Prefer over WebSearch for any established AI-engineering concept.
+          * TestingCorpus.Search — software-testing concepts (test pyramid, test doubles,
+            London vs Detroit/Chicago TDD, 4-pillar test value framework, designing for
+            testability, test smells, mutation testing, property-based testing, integration
+            vs unit strategy).
+          * CodeCraftCorpus.Search — code-quality and functional-programming topics
+            (module/API design, encapsulation, error handling — exceptions vs results vs
+            monads, naming, defensive vs declarative, immutability, pure & higher-order
+            functions, pattern matching, composition over inheritance, code smells).
           * WebSearch.Search — recent developments, specific products, news, or anything not
             covered by the corpora above.
           * BookLookup.GetBookMetadata — when the question mentions a specific book by name and

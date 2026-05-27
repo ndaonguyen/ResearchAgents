@@ -13,7 +13,8 @@ public sealed record OrchestratorConfig(
     string? ResearcherModel = null,
     string? CriticModel = null,
     string? SynthesizerModel = null,
-    bool EnableCriticRetry = true)
+    bool EnableCriticRetry = true,
+    int MaxResearcherConcurrency = 3)
 {
     public static OrchestratorConfig Default { get; } = new();
 }

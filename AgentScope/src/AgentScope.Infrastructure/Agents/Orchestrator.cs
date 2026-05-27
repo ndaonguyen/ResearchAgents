@@ -57,9 +57,27 @@ public sealed class Orchestrator : IOrchestrator
             var (subQuestions, plannerUsage) = await _planner.PlanAsync(request.Question, plannerKernel, request.RunId, ct);
             totalUsage = totalUsage.Add(plannerUsage);
 
-            // 2. RESEARCH — parallel fanout
+            // 2. RESEARCH — parallel fanout, capped at MaxResearcherConcurrency.
+            // Without the cap, a planner returning 5 sub-questions launches 5 researchers
+            // simultaneously, and each researcher makes 2-4 LLM calls (tool selection +
+            // summary). That's 10-20 concurrent OpenAI requests on a single question —
+            // enough to trip Tier-1 TPM limits on gpt-4o (30k/min). The cap trades a
+            // little wall-clock for not blowing through the rate limit; cancellation
+            // and per-research errors flow through normally.
+            using var researcherGate = new SemaphoreSlim(Math.Max(1, config.MaxResearcherConcurrency));
             var researchTasks = subQuestions
-                .Select((q, i) => _researcher.ResearchAsync(q, i + 1, researcherKernel, request.RunId, ct: ct))
+                .Select(async (q, i) =>
+                {
+                    await researcherGate.WaitAsync(ct);
+                    try
+                    {
+                        return await _researcher.ResearchAsync(q, i + 1, researcherKernel, request.RunId, ct: ct);
+                    }
+                    finally
+                    {
+                        researcherGate.Release();
+                    }
+                })
                 .ToList();
             var researchResults = await Task.WhenAll(researchTasks);
             var research = researchResults.Select(r => r.Summary).ToArray();
