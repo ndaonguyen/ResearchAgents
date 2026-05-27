@@ -25,7 +25,7 @@ public sealed class EvalResultsReader
         _logger = logger;
     }
 
-    public string ResultsDirectory => Path.GetFullPath(_options.Evals.ResultsDirectory);
+    public string ResultsDirectory => RepoPath.Resolve(_options.Evals.ResultsDirectory);
 
     /// <summary>
     /// Returns every readable JSONL file in the results directory, newest first.

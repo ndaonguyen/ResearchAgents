@@ -41,7 +41,7 @@ public sealed class EvalQueue
         var id = Guid.NewGuid().ToString("N")[..12];
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         var fileName = $"{Sanitize(request.Variant)}-{stamp}.jsonl";
-        var outputDir = Path.GetFullPath(_options.Evals.ResultsDirectory);
+        var outputDir = RepoPath.Resolve(_options.Evals.ResultsDirectory);
         var outputPath = Path.Combine(outputDir, fileName);
 
         var state = new EvalJobState

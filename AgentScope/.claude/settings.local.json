@@ -22,7 +22,8 @@
       "Read(//tmp/**)",
       "Bash(dotnet add *)",
       "Bash(cmd *)",
-      "Bash(grep -Ev \"NU1507|^$\")"
+      "Bash(grep -Ev \"NU1507|^$\")",
+      "Bash(Select-Object -Last 40)"
     ]
   }
 }

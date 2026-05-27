@@ -79,8 +79,9 @@ public sealed class JudgeOptions
 /// Where the Web UI looks for eval-harness JSONL output, and where it lists question
 /// sets the user can pick from when triggering an eval from the browser.
 ///
-/// Defaults are relative to the process's current working directory — fine when the
-/// Web app is launched from the repo root. Override in appsettings if running elsewhere.
+/// Relative paths are resolved against the repo root via <see cref="RepoPath"/>, so
+/// defaults work regardless of which directory the host is launched from. Absolute
+/// paths in appsettings bypass that and are used as-is.
 /// </summary>
 public sealed class EvalsOptions
 {

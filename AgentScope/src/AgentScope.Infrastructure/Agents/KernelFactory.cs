@@ -74,7 +74,7 @@ public sealed class KernelFactory : IKernelFactory
         // Tavily — ITextSearch surfaced as a kernel function ("WebSearch.Search").
         var tavilySearch = new TavilyTextSearch(
             apiKey: _options.Tavily.ApiKey,
-            options: new TavilyTextSearchOptions { IncludeRawContent = false });
+            options: new TavilyTextSearchOptions { IncludeRawContent = true });
         kernel.Plugins.Add(tavilySearch.CreateWithSearch("WebSearch"));
 
         // Open Library — structured book metadata + table of contents.

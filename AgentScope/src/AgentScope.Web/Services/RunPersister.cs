@@ -36,7 +36,7 @@ public sealed class RunPersister
     {
         try
         {
-            var dir = Path.GetFullPath(_options.Evals.ResultsDirectory);
+            var dir = RepoPath.Resolve(_options.Evals.ResultsDirectory);
             Directory.CreateDirectory(dir);
 
             var fileName = $"ui-{DateTime.UtcNow:yyyyMMdd}.jsonl";

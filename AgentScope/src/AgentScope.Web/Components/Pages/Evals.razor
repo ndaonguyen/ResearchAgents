@@ -214,7 +214,7 @@
     private List<QuestionSetEntry> _questionSets = new();
     private List<EvalJobSnapshot> _jobs = new();
 
-    private string QuestionsDirectory => Path.GetFullPath(Options.Value.Evals.QuestionsDirectory);
+    private string QuestionsDirectory => RepoPath.Resolve(Options.Value.Evals.QuestionsDirectory);
 
     protected override void OnInitialized()
     {
