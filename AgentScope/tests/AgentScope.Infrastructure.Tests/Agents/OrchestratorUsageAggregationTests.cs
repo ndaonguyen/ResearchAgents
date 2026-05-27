@@ -88,8 +88,10 @@ public class OrchestratorUsageAggregationTests
 
         terminal.TokensIn.Should().Be(40);  // 10 * 4 calls
         terminal.TokensOut.Should().Be(20); // 5 * 4 calls
-        // AgentUsage.Empty.Add(null-cost) yields 0, so the seed dominates: total cost is 0m, not null.
-        terminal.EstimatedCostUsd.Should().Be(0m);
+        // AgentUsage.Empty starts with null cost so a run of all-unknown-cost agents
+        // surfaces as unknown (not the misleading $0.0000 that "seed dominates" produced
+        // before AgentUsage.Empty.CostUsd was changed from 0m to null).
+        terminal.EstimatedCostUsd.Should().BeNull();
     }
 
     // -- fakes --
