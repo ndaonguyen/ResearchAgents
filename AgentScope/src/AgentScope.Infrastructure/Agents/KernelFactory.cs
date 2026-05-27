@@ -79,9 +79,13 @@ public sealed class KernelFactory : IKernelFactory
         if (!includePlugins) return kernel;
 
         // Tavily — ITextSearch surfaced as a kernel function ("WebSearch.Search").
+        // IncludeRawContent stays off: raw page text adds ~3-8k tokens per result and gets
+        // re-sent on every subsequent researcher turn, which is the dominant input-token cost
+        // and the main cause of gpt-4o Tier-1 TPM trips. Snippets carry enough signal for
+        // 3-6 sentence summaries with citations.
         var tavilySearch = new TavilyTextSearch(
             apiKey: _options.Tavily.ApiKey,
-            options: new TavilyTextSearchOptions { IncludeRawContent = true });
+            options: new TavilyTextSearchOptions());
         kernel.Plugins.Add(tavilySearch.CreateWithSearch("WebSearch"));
 
         // Open Library — structured book metadata + table of contents.

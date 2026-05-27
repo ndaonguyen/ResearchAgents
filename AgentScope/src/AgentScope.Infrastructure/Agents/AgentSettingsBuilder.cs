@@ -16,7 +16,8 @@ internal static class AgentSettingsBuilder
 {
     public static OpenAIPromptExecutionSettings Build(
         string? responseFormat = null,
-        FunctionChoiceBehavior? functionChoice = null)
+        FunctionChoiceBehavior? functionChoice = null,
+        int? maxTokens = null)
     {
         var settings = new OpenAIPromptExecutionSettings
         {
@@ -28,6 +29,10 @@ internal static class AgentSettingsBuilder
 
         if (responseFormat is not null) settings.ResponseFormat = responseFormat;
         if (functionChoice is not null) settings.FunctionChoiceBehavior = functionChoice;
+        // max_completion_tokens counts against your TPM bucket as a *reservation* at request
+        // time, not just on the response. Capping it on the researcher (which is parallel
+        // and dominates request volume) is the cheapest way to lower the per-call TPM hit.
+        if (maxTokens is not null) settings.MaxTokens = maxTokens;
 
         return settings;
     }

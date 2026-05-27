@@ -111,7 +111,9 @@ public sealed class ResearcherAgent : IResearcherAgent
             Name = $"Researcher-{index}",
             Instructions = SystemPrompt,
             Kernel = kernel,
-            Arguments = new KernelArguments(AgentSettingsBuilder.Build(functionChoice: FunctionChoiceBehavior.Auto()))
+            Arguments = new KernelArguments(AgentSettingsBuilder.Build(
+                functionChoice: FunctionChoiceBehavior.Auto(),
+                maxTokens: 600))
         };
 
         var body = new StringBuilder();

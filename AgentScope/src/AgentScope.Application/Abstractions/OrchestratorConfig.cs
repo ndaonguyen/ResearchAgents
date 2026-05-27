@@ -16,5 +16,14 @@ public sealed record OrchestratorConfig(
     bool EnableCriticRetry = true,
     int MaxResearcherConcurrency = 3)
 {
-    public static OrchestratorConfig Default { get; } = new();
+    /// <summary>
+    /// Default orchestrator config. Researchers are pinned to a small, high-TPM model
+    /// independently of <c>OpenAi.Model</c> so that bumping the global model later
+    /// (e.g. setting the synthesizer to <c>gpt-4o</c>) doesn't also upgrade every
+    /// researcher — which would silently push token usage past Tier-1 rate limits
+    /// (the failure we hit at <c>https://platform.openai.com/account/rate-limits</c>).
+    /// Override per-variant when comparing a premium researcher.
+    /// </summary>
+    public static OrchestratorConfig Default { get; } = new(
+        ResearcherModel: "gpt-4o-mini-2024-07-18");
 }
