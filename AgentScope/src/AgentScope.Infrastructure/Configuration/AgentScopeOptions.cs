@@ -69,10 +69,15 @@ public sealed class QdrantOptions
 /// is decoupled from the orchestrator's default model — typically you want a cheap judge
 /// (e.g. <c>gpt-4o-mini</c>) regardless of what the agents are running.
 /// API key is reused from <see cref="OpenAiOptions"/>.
+///
+/// Pinned to a dated snapshot by default. The floating alias (<c>gpt-4o-mini</c>) rotates
+/// to a new underlying snapshot periodically — historical scores stop being comparable
+/// across that boundary, which silently corrupts variant comparisons. Override in appsettings
+/// when you intentionally want to upgrade the judge.
 /// </summary>
 public sealed class JudgeOptions
 {
-    public string Model { get; init; } = "gpt-4o-mini";
+    public string Model { get; init; } = "gpt-4o-mini-2024-07-18";
 }
 
 /// <summary>

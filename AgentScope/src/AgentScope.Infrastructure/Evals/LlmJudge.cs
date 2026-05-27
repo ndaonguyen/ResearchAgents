@@ -23,14 +23,24 @@ namespace AgentScope.Infrastructure.Evals;
 /// </summary>
 public sealed class LlmJudge : IAnswerJudge
 {
+    // Anchored 1-5 scale. Concrete per-level descriptions reduce inter-call variance
+    // because the judge no longer has to invent its own bar for each level — the
+    // textually adjacent anchors do the work. See docs/evals.md "Calibration discipline".
     private const string DefaultRubric = """
-        Score on a 1-5 scale based on:
+        Score on a 1-5 scale across four dimensions:
         - Factual accuracy (no hallucinations)
         - Completeness (addresses all parts of the question)
         - Shape compliance (matches any requested structure)
         - Citation quality (claims backed by sources where appropriate)
 
-        5 = excellent on all dimensions; 3 = adequate but with notable gaps; 1 = wrong or unusable.
+        Anchored levels:
+        - 5 — All four dimensions met. Would pass a senior engineer's bar without edits.
+        - 4 — Accurate and complete; minor shape or citation gaps. Usable as-is.
+        - 3 — Largely correct but missing one significant dimension OR contains a minor factual slip.
+        - 2 — Multiple gaps OR a factual error that would mislead the reader.
+        - 1 — Wrong, off-topic, or unusable.
+
+        Length alone is not quality — do not reward verbosity. Penalize unnecessary length.
         """;
 
     private const string SystemPrompt = """
@@ -95,6 +105,15 @@ public sealed class LlmJudge : IAnswerJudge
         var json = raw.ToString();
         var (score, reasoning) = ParseVerdict(json);
 
+        // Bounds check: a model that hallucinates score=7 (or 0, -1) would otherwise
+        // poison MeanScore in the Past Runs viewer. Null it out and log so calibration
+        // surfaces the failure mode instead of silently absorbing it.
+        if (score is { } s && (s < 1 || s > 5))
+        {
+            _logger.LogWarning("Judge returned out-of-range score {Score}; treating as null", s);
+            score = null;
+        }
+
         var usage = UsageExtractor.TryExtractWithCost(lastMetadata, _model, _usageCalculator)
                     ?? new AgentUsage(0, 0, null);
 
@@ -131,7 +150,7 @@ public sealed class LlmJudge : IAnswerJudge
         return sb.ToString();
     }
 
-    internal static (int? Score, string? Reasoning) ParseVerdict(string json)
+    private static (int? Score, string? Reasoning) ParseVerdict(string json)
     {
         try
         {
