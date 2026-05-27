@@ -72,3 +72,31 @@ public sealed record AgentErrorEvent(
 {
     public override string Kind => "agent.error";
 }
+
+/// <summary>
+/// One chunk returned by a corpus search. Carries enough metadata for the UI to
+/// render a "Sources used" panel without going back to Qdrant.
+/// </summary>
+public sealed record CorpusChunk(
+    string Book,
+    int PageStart,
+    int PageEnd,
+    double Score,
+    string Text);
+
+/// <summary>
+/// Emitted by <c>CorpusSearchPlugin</c> after Qdrant returns matches. Lets the UI show
+/// exactly which book chunks the LLM saw for a given retrieval — closes the RAG loop
+/// from black box ("the model cited Newman pp. 312-315") to transparent ("here are the
+/// 5 chunks that were retrieved and ranked").
+/// </summary>
+public sealed record CorpusChunksRetrievedEvent(
+    RunId RunId,
+    AgentId AgentId,
+    string Corpus,
+    string Query,
+    IReadOnlyList<CorpusChunk> Chunks,
+    DateTime Timestamp) : AgentEvent(RunId, AgentId, Timestamp)
+{
+    public override string Kind => "corpus.chunks";
+}

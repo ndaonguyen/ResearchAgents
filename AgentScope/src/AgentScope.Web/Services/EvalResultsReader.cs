@@ -112,7 +112,26 @@ public sealed record EvalRow(
     int JudgeTokensIn,
     int JudgeTokensOut,
     decimal? JudgeCostUsd,
-    DateTime CompletedAt);
+    DateTime CompletedAt,
+    // Optional: corpus chunks the agents retrieved during this run. Populated by the
+    // Practice/QuickCheck page so the Past Runs viewer can show what grounded each answer.
+    // Older JSONL rows have this as null — readers must treat null as "no sources captured".
+    IReadOnlyList<SourceChunk>? Sources = null);
+
+/// <summary>
+/// Persisted form of a corpus chunk that was retrieved during a run. Keyed by the
+/// AgentId that retrieved it so the viewer can group sources per agent — same shape
+/// as the live <see cref="AgentScope.Domain.Events.CorpusChunk"/> with one extra
+/// attribution field.
+/// </summary>
+public sealed record SourceChunk(
+    string AgentId,
+    string Corpus,
+    string Book,
+    int PageStart,
+    int PageEnd,
+    double Score,
+    string Text);
 
 public sealed record EvalResultFile(
     string Name,

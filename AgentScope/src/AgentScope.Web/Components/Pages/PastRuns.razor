@@ -124,6 +124,29 @@
                                                         <div class="reasoning">@row.JudgeReasoning</div>
                                                     </div>
                                                 }
+                                                @if (row.Sources is { Count: > 0 } sources)
+                                                {
+                                                    <div class="detail-block">
+                                                        <div class="label">Sources used (@sources.Count chunks across @sources.Select(s => s.AgentId).Distinct().Count() agent(s))</div>
+                                                        @foreach (var byAgent in sources.GroupBy(s => s.AgentId))
+                                                        {
+                                                            <details class="sources-panel">
+                                                                <summary>📚 @byAgent.Key — @byAgent.Count() chunk(s)</summary>
+                                                                <ol class="sources-list">
+                                                                    @foreach (var c in byAgent)
+                                                                    {
+                                                                        <li>
+                                                                            <div class="source-meta">
+                                                                                @c.Book<span class="source-pages">@(c.PageStart == c.PageEnd ? $" · p. {c.PageStart}" : $" · pp. {c.PageStart}-{c.PageEnd}")</span><span class="source-score"> · score @c.Score.ToString("F3", CultureInfo.InvariantCulture)</span>
+                                                                            </div>
+                                                                            <pre class="source-text">@c.Text</pre>
+                                                                        </li>
+                                                                    }
+                                                                </ol>
+                                                            </details>
+                                                        }
+                                                    </div>
+                                                }
                                             }
                                         </div>
                                     </td>
@@ -184,6 +207,16 @@
     .detail-block pre.answer { background: white; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: inherit; font-size: 0.9rem; }
     .detail-block pre.error { background: #fef2f2; color: #b91c1c; padding: 12px; border: 1px solid #fecaca; border-radius: 6px; white-space: pre-wrap; margin: 0; font-size: 0.85rem; }
     .detail-block .reasoning { background: white; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-style: italic; color: #334155; }
+
+    .sources-panel { background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; margin-bottom: 8px; }
+    .sources-panel summary { cursor: pointer; font-size: 0.85rem; color: #475569; font-weight: 500; padding: 4px 0; outline: none; user-select: none; }
+    .sources-panel summary:hover { color: #1e293b; }
+    .sources-list { list-style: decimal; padding-left: 22px; margin: 8px 0 4px; display: flex; flex-direction: column; gap: 10px; }
+    .sources-list li { font-size: 0.85rem; color: #334155; }
+    .source-meta { font-weight: 600; color: #1e293b; }
+    .source-pages { font-weight: 500; color: #475569; }
+    .source-score { font-weight: 400; color: #94a3b8; font-family: 'JetBrains Mono', 'Consolas', monospace; }
+    .source-text { margin: 4px 0 0; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-family: inherit; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; max-height: 240px; overflow-y: auto; }
 </style>
 
 @code {

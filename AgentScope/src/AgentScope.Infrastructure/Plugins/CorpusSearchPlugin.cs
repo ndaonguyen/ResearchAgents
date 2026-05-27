@@ -3,6 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Serialization;
+using AgentScope.Application.Abstractions;
+using AgentScope.Domain.Events;
+using AgentScope.Infrastructure.Agents;
 using AgentScope.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 using Qdrant.Client;
@@ -29,6 +32,8 @@ public sealed class CorpusSearchPlugin : IDisposable
     private readonly OpenAiOptions _openAiOptions;
     private readonly QdrantClient _qdrant;
     private readonly HttpClient _embeddingsHttp;
+    private readonly IAgentEventBus? _bus;
+    private readonly AgentRunContext? _runContext;
     private readonly ILogger<CorpusSearchPlugin> _logger;
 
     public CorpusSearchPlugin(
@@ -36,10 +41,14 @@ public sealed class CorpusSearchPlugin : IDisposable
         QdrantOptions qdrant,
         OpenAiOptions openAi,
         IHttpClientFactory httpClientFactory,
-        ILogger<CorpusSearchPlugin> logger)
+        ILogger<CorpusSearchPlugin> logger,
+        IAgentEventBus? bus = null,
+        AgentRunContext? runContext = null)
     {
         _corpus = corpus;
         _openAiOptions = openAi;
+        _bus = bus;
+        _runContext = runContext;
         _logger = logger;
 
         _qdrant = new QdrantClient(
@@ -78,6 +87,8 @@ public sealed class CorpusSearchPlugin : IDisposable
                 payloadSelector: true,
                 cancellationToken: ct);
 
+            await PublishChunksRetrievedAsync(query, results, ct);
+
             if (results.Count == 0)
                 return $"No matches in the {_corpus.Name} corpus.";
 
@@ -87,6 +98,40 @@ public sealed class CorpusSearchPlugin : IDisposable
         {
             _logger.LogWarning(ex, "Corpus search failed for {Corpus}: {Query}", _corpus.Name, query);
             return $"{_corpus.PluginName} search failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Pushes a structured <see cref="CorpusChunksRetrievedEvent"/> so the UI can render a
+    /// per-agent "Sources used" panel. Best-effort: if there's no active run context (e.g.
+    /// the plugin was called outside a tracked agent run, or the bus isn't wired), we
+    /// silently skip — the LLM-facing string return is unaffected.
+    /// </summary>
+    private async Task PublishChunksRetrievedAsync(
+        string query, IReadOnlyList<ScoredPoint> results, CancellationToken ct)
+    {
+        if (_bus is null || _runContext is null) return;
+        if (_runContext.RunId is not { } runId || _runContext.AgentId is not { } agentId) return;
+
+        var chunks = new List<CorpusChunk>(results.Count);
+        foreach (var p in results)
+        {
+            var book = ReadString(p.Payload, "source_book") ?? "unknown";
+            var pageStart = (int)ReadLong(p.Payload, "page_start");
+            var pageEnd = (int)ReadLong(p.Payload, "page_end");
+            var text = ReadString(p.Payload, "text") ?? "";
+            chunks.Add(new CorpusChunk(book, pageStart, pageEnd, p.Score, text));
+        }
+
+        try
+        {
+            await _bus.PublishAsync(new CorpusChunksRetrievedEvent(
+                runId, agentId, _corpus.PluginName ?? _corpus.Name, query, chunks, DateTime.UtcNow), ct);
+        }
+        catch (Exception ex)
+        {
+            // Never let a UI-publication failure break the retrieval. Log and continue.
+            _logger.LogDebug(ex, "Failed to publish CorpusChunksRetrievedEvent for {Corpus}", _corpus.Name);
         }
     }
 

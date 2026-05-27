@@ -1,3 +1,4 @@
+using AgentScope.Application.Abstractions;
 using AgentScope.Infrastructure.Configuration;
 using AgentScope.Infrastructure.Agents.Filters;
 using AgentScope.Infrastructure.Plugins;
@@ -35,17 +36,23 @@ public sealed class KernelFactory : IKernelFactory
     private readonly EventPublishingFunctionFilter _filter;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IAgentEventBus _bus;
+    private readonly AgentRunContext _runContext;
 
     public KernelFactory(
         IOptions<AgentScopeOptions> options,
         EventPublishingFunctionFilter filter,
         ILoggerFactory loggerFactory,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IAgentEventBus bus,
+        AgentRunContext runContext)
     {
         _options = options.Value;
         _filter = filter;
         _loggerFactory = loggerFactory;
         _httpClientFactory = httpClientFactory;
+        _bus = bus;
+        _runContext = runContext;
     }
 
     public Kernel Create(string? modelOverride = null, bool includePlugins = true)
@@ -91,7 +98,9 @@ public sealed class KernelFactory : IKernelFactory
                 _options.Qdrant,
                 _options.OpenAi,
                 _httpClientFactory,
-                _loggerFactory.CreateLogger<CorpusSearchPlugin>());
+                _loggerFactory.CreateLogger<CorpusSearchPlugin>(),
+                _bus,
+                _runContext);
 
             var function = KernelFunctionFactory.CreateFromMethod(
                 method: plugin.SearchAsync,

@@ -195,6 +195,17 @@
                 </div>
             }
 
+            @if (_session.BatchSubmitted)
+            {
+                var qcSources = SourcesForAgent(AgentId.QuickCheck.Value);
+                if (qcSources.Count > 0)
+                {
+                    <div class="batch-sources">
+                        @SourcesPanel(qcSources)
+                    </div>
+                }
+            }
+
             @if (!_session.BatchSubmitted)
             {
                 <div class="batch-submit">
@@ -221,9 +232,14 @@
         <section class="transcript">
             @foreach (var turn in _session.Transcript)
             {
+                var sources = SourcesForAgent(AgentIdFor(turn.Speaker));
                 <div class="turn turn-@turn.Speaker.ToString().ToLowerInvariant()">
                     <div class="speaker">@LabelFor(turn.Speaker)</div>
                     <div class="text">@turn.Text</div>
+                    @if (sources.Count > 0)
+                    {
+                        @SourcesPanel(sources)
+                    }
                 </div>
             }
 
@@ -312,6 +328,11 @@
                             <li>@g</li>
                         }
                     </ul>
+                    var graderSources = SourcesForAgent(AgentId.Grader.Value);
+                    if (graderSources.Count > 0)
+                    {
+                        @SourcesPanel(graderSources)
+                    }
                 }
 
                 @if (_session.FinalCoaching is not null)
@@ -453,6 +474,17 @@
     .mcq-result button.primary { padding: 10px 18px; border: 0; background: #2563eb; color: white; font-weight: 600; font-size: 1rem; }
     .mcq-result button.primary:hover { background: #1d4ed8; }
     .mcq-result button.primary:disabled { background: #94a3b8; }
+
+    .sources-panel { margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+    .sources-panel summary { cursor: pointer; font-size: 0.85rem; color: #475569; font-weight: 500; padding: 4px 0; outline: none; user-select: none; }
+    .sources-panel summary:hover { color: #1e293b; }
+    .sources-list { list-style: decimal; padding-left: 22px; margin: 8px 0 4px; display: flex; flex-direction: column; gap: 10px; }
+    .sources-list li { font-size: 0.85rem; color: #334155; }
+    .source-meta { font-weight: 600; color: #1e293b; }
+    .source-pages { font-weight: 500; color: #475569; }
+    .source-score { font-weight: 400; color: #94a3b8; font-family: 'JetBrains Mono', 'Consolas', monospace; }
+    .source-text { margin: 4px 0 0; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-family: inherit; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; max-height: 240px; overflow-y: auto; }
+    .batch-sources { margin-top: 16px; padding: 0 4px; }
 </style>
 
 @code {
@@ -495,6 +527,15 @@
 
     private string? _currentAgentMessage;
     private string _currentAgentLabel = "";
+
+    // Per-agent corpus chunks retrieved in the CURRENT question/batch. Keyed by
+    // AgentId.Value (e.g. "interviewer", "model-answer", "grader"); reset at the start
+    // of each new question (Discussion) or new batch (QuickCheck) so old retrievals
+    // don't leak into the next render. Same store powers the per-turn "Sources used"
+    // expander in Discussion mode AND the batch-level expander in QuickCheck mode.
+    // Stored as SourceChunk (not the domain's CorpusChunk) so the persistence path can
+    // serialise the dictionary contents directly without a second mapping step.
+    private readonly Dictionary<string, List<SourceChunk>> _chunksByAgent = new();
 
     private CancellationTokenSource? _subscriptionCts;
 
@@ -646,6 +687,7 @@
         _batchIndex = _selectedMode == InterviewMode.QuickCheck ? 1 : 0;
         _discussionQuestionIndex = _selectedMode == InterviewMode.Discussion ? 1 : 0;
         _cumulativeScores.Clear();
+        _chunksByAgent.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
 
@@ -712,6 +754,7 @@
         _busy = true;
         _runId = RunId.New();
         _discussionQuestionIndex++;
+        _chunksByAgent.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
 
@@ -736,6 +779,7 @@
         _busy = true;
         _runId = RunId.New();
         _batchIndex++;
+        _chunksByAgent.Clear();
         StartEventSubscription(_runId);
         StateHasChanged();
 
@@ -846,9 +890,92 @@
                 // Sub-agent done — clear the streaming bubble (the finalized text appears via the transcript).
                 _currentAgentMessage = null;
                 break;
+            case CorpusChunksRetrievedEvent retrieved:
+                // Bucket by AgentId so each transcript turn / agent panel can render only
+                // the chunks it actually saw. An agent can retrieve more than once in a
+                // single call (the LLM may issue multiple .Search invocations), so we
+                // append rather than overwrite.
+                if (!_chunksByAgent.TryGetValue(retrieved.AgentId.Value, out var list))
+                {
+                    list = new List<SourceChunk>();
+                    _chunksByAgent[retrieved.AgentId.Value] = list;
+                }
+                list.AddRange(retrieved.Chunks.Select(c => new SourceChunk(
+                    retrieved.AgentId.Value, retrieved.Corpus, c.Book, c.PageStart, c.PageEnd, c.Score, c.Text)));
+                break;
         }
         await InvokeAsync(StateHasChanged);
     }
+
+    /// <summary>
+    /// Maps a transcript Speaker to the AgentId that produced its content, so the
+    /// "Sources used" expander under each turn can pull the chunks from the right bucket.
+    /// Speakers that don't retrieve (User, Probe) return null and render no panel.
+    /// </summary>
+    private static string? AgentIdFor(Speaker speaker) => speaker switch
+    {
+        Speaker.Interviewer => AgentId.Interviewer.Value,
+        Speaker.Hint        => AgentId.Hint.Value,
+        Speaker.ModelAnswer => AgentId.ModelAnswer.Value,
+        _ => null
+    };
+
+    private IReadOnlyList<SourceChunk> SourcesForAgent(string? agentIdValue) =>
+        agentIdValue is not null && _chunksByAgent.TryGetValue(agentIdValue, out var list)
+            ? list
+            : Array.Empty<SourceChunk>();
+
+    private IReadOnlyList<SourceChunk> AllSources() =>
+        _chunksByAgent.Values.SelectMany(v => v).ToList();
+
+    /// <summary>
+    /// Collapsible "Sources used" panel — same shape under every agent turn and the
+    /// QuickCheck batch. Closed by default so the transcript stays clean; each chunk
+    /// shows book + page range + retrieval score, plus the full chunk text on expand
+    /// so the candidate can verify what the LLM actually saw.
+    /// </summary>
+    private RenderFragment SourcesPanel(IReadOnlyList<SourceChunk> chunks) => builder =>
+    {
+        builder.OpenElement(0, "details");
+        builder.AddAttribute(1, "class", "sources-panel");
+
+        builder.OpenElement(2, "summary");
+        builder.AddContent(3, $"📚 Sources used ({chunks.Count})");
+        builder.CloseElement();
+
+        builder.OpenElement(4, "ol");
+        builder.AddAttribute(5, "class", "sources-list");
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var c = chunks[i];
+            builder.OpenElement(6, "li");
+            builder.AddAttribute(7, "key", i);
+
+            builder.OpenElement(8, "div");
+            builder.AddAttribute(9, "class", "source-meta");
+            builder.AddContent(10, c.Book);
+            builder.OpenElement(11, "span");
+            builder.AddAttribute(12, "class", "source-pages");
+            builder.AddContent(13, c.PageStart == c.PageEnd
+                ? $" · p. {c.PageStart}"
+                : $" · pp. {c.PageStart}-{c.PageEnd}");
+            builder.CloseElement();
+            builder.OpenElement(14, "span");
+            builder.AddAttribute(15, "class", "source-score");
+            builder.AddContent(16, $" · score {c.Score:F3}");
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(17, "pre");
+            builder.AddAttribute(18, "class", "source-text");
+            builder.AddContent(19, c.Text);
+            builder.CloseElement();
+
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+    };
 
     private async Task PersistBatchAsync()
     {
@@ -883,6 +1010,11 @@
                     ? "\n\nSources:\n  - " + string.Join("\n  - ", q.Citations)
                     : "");
 
+            // QuickCheck chunks are retrieved once for the whole batch (the LLM generates
+            // all N questions in a single call), so we attach the same chunks to every
+            // per-question row — they're shared evidence, not per-question.
+            var batchSources = AllSources();
+
             var row = new EvalRow(
                 QuestionId: $"{_session.SessionId}-b{_batchIndex}-q{i + 1}",
                 Variant: "interview-quickcheck",
@@ -900,7 +1032,8 @@
                 JudgeTokensIn: 0,
                 JudgeTokensOut: 0,
                 JudgeCostUsd: null,
-                CompletedAt: DateTime.UtcNow);
+                CompletedAt: DateTime.UtcNow,
+                Sources: batchSources.Count > 0 ? batchSources : null);
 
             await Persister.PersistAsync(row);
         }
@@ -926,6 +1059,8 @@
             ? $"{_session.SessionId}-d{_discussionQuestionIndex}"
             : _session.SessionId;
 
+        var sessionSources = AllSources();
+
         var row = new EvalRow(
             QuestionId: questionId,
             Variant: "interview",
@@ -943,7 +1078,8 @@
             JudgeTokensIn: 0,
             JudgeTokensOut: 0,
             JudgeCostUsd: null,
-            CompletedAt: DateTime.UtcNow);
+            CompletedAt: DateTime.UtcNow,
+            Sources: sessionSources.Count > 0 ? sessionSources : null);
 
         await Persister.PersistAsync(row);
     }
