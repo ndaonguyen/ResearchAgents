@@ -14,9 +14,13 @@ using Microsoft.SemanticKernel.Connectors.OpenAI;
 namespace AgentScope.Infrastructure.Evals;
 
 /// <summary>
-/// LLM-as-judge. Scores one (question, answer) pair on a 1-5 scale with one-sentence reasoning.
-/// Uses its own minimal kernel (no plugins, no event filter) — judge calls must not pollute
-/// the run event stream and don't need WebSearch/BookLookup.
+/// LLM-as-judge — a single judge call. Scores one (question, answer) pair on a 1-5 scale with
+/// one-sentence reasoning. Uses its own minimal kernel (no plugins, no event filter) — judge
+/// calls must not pollute the run event stream and don't need WebSearch/BookLookup.
+///
+/// This type deliberately does exactly ONE model call per score so it stays trivially testable.
+/// Multi-sample (n-of-k) aggregation lives in <see cref="PanelJudge"/>, which wraps this and
+/// calls <see cref="ScoreOnceAsync"/> k times with distinct seeds.
 ///
 /// Calibration discipline: before trusting these scores at scale, hand-grade ~20 outputs
 /// and check agreement with the judge. Without that step, the leaderboard is confidently wrong.
@@ -59,6 +63,8 @@ public sealed class LlmJudge : IAnswerJudge
     private readonly IKernelFactory _kernelFactory;
     private readonly IUsageCalculator _usageCalculator;
     private readonly string _model;
+    private readonly double _temperature;
+    private readonly long? _seedBase;
     private readonly ILogger<LlmJudge> _logger;
 
     public LlmJudge(
@@ -70,10 +76,21 @@ public sealed class LlmJudge : IAnswerJudge
         _kernelFactory = kernelFactory;
         _usageCalculator = usageCalculator;
         _model = options.Value.Judge.Model;
+        _temperature = options.Value.Judge.Temperature;
+        _seedBase = options.Value.Judge.SeedBase;
         _logger = logger;
     }
 
-    public async Task<JudgeVerdict> ScoreAsync(EvalQuestion question, string answer, CancellationToken ct = default)
+    /// <summary>
+    /// Port entry point — a single sample using the configured base seed. <see cref="PanelJudge"/>
+    /// bypasses this and calls <see cref="ScoreOnceAsync"/> directly to vary the seed per sample.
+    /// </summary>
+    public Task<JudgeVerdict> ScoreAsync(EvalQuestion question, string answer, CancellationToken ct = default)
+        => ScoreOnceAsync(question, answer, _seedBase, ct);
+
+    /// <summary>One judge call. <paramref name="seed"/> is passed through to the model for
+    /// best-effort reproducibility; null leaves it unset.</summary>
+    public async Task<JudgeVerdict> ScoreOnceAsync(EvalQuestion question, string answer, long? seed, CancellationToken ct = default)
     {
         var kernel = _kernelFactory.Create(modelOverride: _model, includePlugins: false);
 
@@ -85,7 +102,8 @@ public sealed class LlmJudge : IAnswerJudge
             Arguments = new KernelArguments(new OpenAIPromptExecutionSettings
             {
                 ResponseFormat = "json_object",
-                Temperature = 0.0  // judge should be as deterministic as we can get it
+                Temperature = _temperature,  // 0 for a lone sample; raise for n-of-k diversity
+                Seed = seed
             })
         };
 

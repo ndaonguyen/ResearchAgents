@@ -181,7 +181,7 @@ AgentScope/
 │   ├── AgentScope.Infrastructure/ # SK adapters, event bus, plugins
 │   └── AgentScope.Web/            # Blazor Server, SignalR hub, Past Runs page
 ├── tests/
-│   ├── AgentScope.Domain.Tests/
+│   ├── AgentScope.Domain.Tests/b
 │   ├── AgentScope.Application.Tests/
 │   ├── AgentScope.Infrastructure.Tests/
 │   └── AgentScope.Evals/          # Eval CLI (console app, not unit tests)

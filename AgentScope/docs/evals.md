@@ -18,6 +18,8 @@ Two front-ends share the same runner (`AgentScope.Application/Evals/EvalRunner`)
 
 2. **Optional — pick a cheaper judge model.** Default is `gpt-4o-mini` (in `tests/AgentScope.Evals/appsettings.json` under `AgentScope:Judge:Model`). Override via user secrets or appsettings.
 
+3. **Optional — turn on n-of-k judging.** See [Judge sampling](#judge-sampling-n-of-k) below.
+
 ## Running a variant
 
 From the **repo root** (the CLI writes `results/` relative to the current directory):
@@ -103,11 +105,14 @@ Each line is an `EvalResult`:
   "CostUsd": 0.0023,             // agent-side only
   "DurationMs": 18432,
   "Errored": false, "ErrorMessage": null,
-  "JudgeScore": 4,
+  "JudgeScore": 4,               // headline = median of JudgeScores
   "JudgeReasoning": "Covers the definition and gives three use cases…",
   "JudgeTokensIn": 612, "JudgeTokensOut": 47,
-  "JudgeCostUsd": 0.0001,        // judge-side separately
-  "CompletedAt": "2026-05-22T06:06:04.95Z"
+  "JudgeCostUsd": 0.0001,        // judge-side separately, summed across samples
+  "CompletedAt": "2026-05-22T06:06:04.95Z",
+  "JudgeScores": [4, 4, 5],      // raw per-sample votes (n-of-k); [s] for single-sample
+  "JudgeScoreStdDev": 0.47,      // spread of the votes; null when <2 samples
+  "SchemaVersion": 2             // absent on pre-n-of-k rows
 }
 ```
 
@@ -128,9 +133,30 @@ The UI writes to the same JSONL files the CLI does, named `{variant}-{yyyyMMdd-H
 }
 ```
 
+## Judge sampling (n-of-k)
+
+By default the judge makes **one** call per answer (`Samples = 1`) at temperature 0 — a point estimate with no error bar. Turn on n-of-k self-consistency to measure (and reduce) judge noise. Config lives under `AgentScope:Judge`:
+
+| Key | Default | Notes |
+|---|---|---|
+| `Samples` | `1` | Independent judge calls per answer. Headline `JudgeScore` is their **median**; the raw votes are kept in `JudgeScores`. |
+| `Temperature` | `0.0` | Keep at 0 for a single sample. Raise to ~0.5–0.7 when `Samples > 1`, or every draw is identical and the spread is meaningless. |
+| `SeedBase` | `null` | When set, sample `i` uses `SeedBase + i`. Makes the whole panel reproducible across re-runs (best-effort — OpenAI seeds hold only while the backend `system_fingerprint` is stable). |
+
+Example (`appsettings.json` or user secrets):
+```json
+"Judge": { "Model": "gpt-4o-mini-2024-07-18", "Samples": 5, "Temperature": 0.6, "SeedBase": 1000 }
+```
+
+The five calls fan out concurrently, so wall-clock ≈ one call; cost is 5×, but the judge model is cheap relative to the agent run. The implementation is `PanelJudge` wrapping `LlmJudge` — `PanelJudge.Reduce` does the median/std-dev aggregation (unit-tested in `PanelJudgeReduceTests`). Median over mean is deliberate: on an ordinal 1–5 scale one rogue draw shouldn't drag the headline.
+
+**Why bother:** with `JudgeScoreStdDev` recorded per row (and `MeanJudgeDispersion` aggregated per file in the Past Runs viewer), you can finally tell whether a variant's score delta is real or just judge noise — a 4.2-vs-4.0 gap means nothing if the judge's own spread is ±0.6.
+
 ## Calibration discipline
 
 Before trusting the leaderboard, hand-grade ~20 outputs and compare with `JudgeScore`. If the judge disagrees with you wildly, tighten the rubric in `LlmJudge.cs` before running larger evals.
+
+n-of-k cuts *variance* but not *bias*: five samples of the same model that's systematically too generous are confidently too generous five times. The next step up — a heterogeneous panel of different judge models — is a one-line change to make `Samples` a list of models instead, but isn't wired yet.
 
 ## Troubleshooting
 

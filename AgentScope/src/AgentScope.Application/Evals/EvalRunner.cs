@@ -140,7 +140,9 @@ public sealed class EvalRunner
             PlannerModel: fingerprint.PlannerModel,
             ResearcherModel: fingerprint.ResearcherModel,
             CriticModel: fingerprint.CriticModel,
-            SynthesizerModel: fingerprint.SynthesizerModel);
+            SynthesizerModel: fingerprint.SynthesizerModel,
+            JudgeScores: verdict?.Scores,
+            JudgeScoreStdDev: verdict?.ScoreStdDev);
     }
 }
 

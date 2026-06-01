@@ -116,7 +116,12 @@ public sealed record EvalRow(
     // Optional: corpus chunks the agents retrieved during this run. Populated by the
     // Practice/QuickCheck page so the Past Runs viewer can show what grounded each answer.
     // Older JSONL rows have this as null — readers must treat null as "no sources captured".
-    IReadOnlyList<SourceChunk>? Sources = null);
+    IReadOnlyList<SourceChunk>? Sources = null,
+    // n-of-k judge fields. JudgeScore stays the headline (median); JudgeScores holds the raw
+    // votes and JudgeScoreStdDev their spread. Null on single-sample / pre-feature rows.
+    IReadOnlyList<int>? JudgeScores = null,
+    double? JudgeScoreStdDev = null,
+    int SchemaVersion = 0);
 
 /// <summary>
 /// Persisted form of a corpus chunk that was retrieved during a run. Keyed by the
@@ -170,6 +175,21 @@ public sealed record EvalResultFile(
         {
             var costs = Rows.Where(r => r.JudgeCostUsd is not null).Select(r => r.JudgeCostUsd!.Value).ToList();
             return costs.Count == 0 ? null : costs.Sum();
+        }
+    }
+
+    /// <summary>
+    /// Mean of the per-row judge dispersions (n-of-k std-dev) across rows that recorded one.
+    /// A high value warns that the judge was unstable on this set — read <see cref="MeanScore"/>
+    /// deltas against other variants with suspicion. Null when no row carries a dispersion
+    /// (single-sample judge, or pre-feature JSONL).
+    /// </summary>
+    public double? MeanJudgeDispersion
+    {
+        get
+        {
+            var spreads = Rows.Where(r => r.JudgeScoreStdDev is not null).Select(r => r.JudgeScoreStdDev!.Value).ToList();
+            return spreads.Count == 0 ? null : spreads.Average();
         }
     }
 }

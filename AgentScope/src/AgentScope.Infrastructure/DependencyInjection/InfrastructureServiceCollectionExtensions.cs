@@ -80,8 +80,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOrchestrator, Orchestrator>();
 
         // LLM-as-judge for the eval harness. Scoped — judge calls are part of an
-        // orchestrator scope when invoked through EvalRunner.
-        services.AddScoped<IAnswerJudge, LlmJudge>();
+        // orchestrator scope when invoked through EvalRunner. LlmJudge does one model call;
+        // PanelJudge wraps it for n-of-k self-consistency (median + dispersion) and is the
+        // port the rest of the app sees. With Judge:Samples=1 (default) the panel degenerates
+        // to a single call, so behaviour is unchanged until you opt into sampling.
+        services.AddScoped<LlmJudge>();
+        services.AddScoped<IAnswerJudge, PanelJudge>();
 
         // Captures the resolved-models + prompt-hash for each variant run, stamped into
         // every EvalResult so historical comparisons stay honest across config/prompt drift.

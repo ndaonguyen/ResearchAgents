@@ -85,6 +85,29 @@ public sealed class QdrantOptions
 public sealed class JudgeOptions
 {
     public string Model { get; init; } = "gpt-4o-mini-2024-07-18";
+
+    /// <summary>
+    /// Number of independent judge calls per answer (n-of-k self-consistency). The headline
+    /// score is the median of the samples; their spread is recorded as the dispersion.
+    /// Default 1 = single call, behaviour unchanged. For a meaningful spread you must also
+    /// raise <see cref="Temperature"/> above 0 — k identical greedy draws carry no variance.
+    /// </summary>
+    public int Samples { get; init; } = 1;
+
+    /// <summary>
+    /// Sampling temperature for judge calls. 0 (default) is greedy/near-deterministic — correct
+    /// for a single sample. Raise to ~0.5-0.7 when <see cref="Samples"/> &gt; 1 so the draws
+    /// actually differ and the dispersion measures something.
+    /// </summary>
+    public double Temperature { get; init; } = 0.0;
+
+    /// <summary>
+    /// Base seed for judge calls. When set, sample <c>i</c> uses <c>SeedBase + i</c>, making the
+    /// whole panel reproducible: re-running an eval reproduces the same k scores (best-effort —
+    /// OpenAI seeds hold only while the backend <c>system_fingerprint</c> is unchanged). Null
+    /// leaves the seed unset (non-reproducible sampling).
+    /// </summary>
+    public long? SeedBase { get; init; }
 }
 
 /// <summary>
